@@ -744,7 +744,7 @@ static void nested_vmcb02_prepare_control(struct vcpu_svm *svm,
 
 	pause_count12 = svm->pause_filter_enabled ? svm->nested.ctl.pause_filter_count : 0;
 	pause_thresh12 = svm->pause_threshold_enabled ? svm->nested.ctl.pause_filter_thresh : 0;
-	if (kvm_pause_in_guest(svm->vcpu.kvm)) {
+	if (kvm_pause_in_guest(&svm->vcpu)) {
 		/* use guest values since host doesn't intercept PAUSE */
 		vmcb02->control.pause_filter_count = pause_count12;
 		vmcb02->control.pause_filter_thresh = pause_thresh12;
@@ -1034,7 +1034,7 @@ int nested_svm_vmexit(struct vcpu_svm *svm)
 	vmcb12->control.event_inj         = svm->nested.ctl.event_inj;
 	vmcb12->control.event_inj_err     = svm->nested.ctl.event_inj_err;
 
-	if (!kvm_pause_in_guest(vcpu->kvm)) {
+	if (!kvm_pause_in_guest(vcpu)) {
 		vmcb01->control.pause_filter_count = vmcb02->control.pause_filter_count;
 		vmcb_mark_dirty(vmcb01, VMCB_INTERCEPTS);
 
