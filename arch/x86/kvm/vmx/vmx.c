@@ -5709,6 +5709,7 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	gpa_t gpa;
 	u64 error_code;
 
+	pr_err_once("%s%d: inside handle_ept_violation", __func__, __LINE__);
 	exit_qualification = vmx_get_exit_qual(vcpu);
 
 	/*
@@ -5724,6 +5725,7 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(vcpu, gpa, exit_qualification);
+	pr_info("%s%d: trace_kvm_page_fault", __func__, __LINE__);
 
 	/* Is it a read fault? */
 	error_code = (exit_qualification & EPT_VIOLATION_ACC_READ)
@@ -5751,9 +5753,12 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 	 * would also use advanced VM-exit information for EPT violations to
 	 * reconstruct the page fault error code.
 	 */
-	if (unlikely(allow_smaller_maxphyaddr && kvm_vcpu_is_illegal_gpa(vcpu, gpa)))
+	if (unlikely(allow_smaller_maxphyaddr && kvm_vcpu_is_illegal_gpa(vcpu, gpa))){
+		pr_err_once("%s%d: kvm_emulate_instruction", __func__, __LINE__);
 		return kvm_emulate_instruction(vcpu, 0);
+	}
 
+	pr_err_once("%s%d: kvm_mmu_page_fault", __func__, __LINE__);
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
 
@@ -6533,6 +6538,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	if (!kvm_vmx_exit_handlers[exit_handler_index])
 		goto unexpected_vmexit;
 
+	pr_err_once("%s%d: kvm_vmx_exit_handlers[%d]", __func__, __LINE__, exit_handler_index);
 	return kvm_vmx_exit_handlers[exit_handler_index](vcpu);
 
 unexpected_vmexit:

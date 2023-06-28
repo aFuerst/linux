@@ -5142,16 +5142,19 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	int rc = X86EMUL_CONTINUE;
 	int saved_dst_type = ctxt->dst.type;
 	bool is_guest_mode = ctxt->ops->is_guest_mode(ctxt);
-
+	pr_info("%s%d: emulating instruction", __func__, __LINE__);
+	
 	ctxt->mem_read.pos = 0;
 
 	/* LOCK prefix is allowed only with some instructions */
 	if (ctxt->lock_prefix && (!(ctxt->d & Lock) || ctxt->dst.type != OP_MEM)) {
+		pr_err_once("%s%d: emulate ud 1", __func__, __LINE__);
 		rc = emulate_ud(ctxt);
 		goto done;
 	}
 
 	if ((ctxt->d & SrcMask) == SrcMemFAddr && ctxt->src.type != OP_MEM) {
+		pr_err_once("%s%d: emulate ud 2", __func__, __LINE__);
 		rc = emulate_ud(ctxt);
 		goto done;
 	}
@@ -5160,22 +5163,26 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 		     (No64|Undefined|Sse|Mmx|Intercept|CheckPerm|Priv|Prot|String))) {
 		if ((ctxt->mode == X86EMUL_MODE_PROT64 && (ctxt->d & No64)) ||
 				(ctxt->d & Undefined)) {
+			pr_err_once("%s%d: emulate ud 3", __func__, __LINE__);
 			rc = emulate_ud(ctxt);
 			goto done;
 		}
 
 		if (((ctxt->d & (Sse|Mmx)) && ((ops->get_cr(ctxt, 0) & X86_CR0_EM)))
 		    || ((ctxt->d & Sse) && !(ops->get_cr(ctxt, 4) & X86_CR4_OSFXSR))) {
+			pr_err_once("%s%d: emulate ud 4", __func__, __LINE__);
 			rc = emulate_ud(ctxt);
 			goto done;
 		}
 
 		if ((ctxt->d & (Sse|Mmx)) && (ops->get_cr(ctxt, 0) & X86_CR0_TS)) {
+			pr_err_once("%s%d: emulate nm 1", __func__, __LINE__);
 			rc = emulate_nm(ctxt);
 			goto done;
 		}
 
 		if (ctxt->d & Mmx) {
+			pr_err_once("%s%d: emulate flush_pending_x87_faults 1", __func__, __LINE__);
 			rc = flush_pending_x87_faults(ctxt);
 			if (rc != X86EMUL_CONTINUE)
 				goto done;
@@ -5190,6 +5197,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 		}
 
 		if (unlikely(is_guest_mode) && ctxt->intercept) {
+			pr_err_once("%s%d: emulate  emulator_check_intercept 1", __func__, __LINE__);
 			rc = emulator_check_intercept(ctxt, ctxt->intercept,
 						      X86_ICPT_PRE_EXCEPT);
 			if (rc != X86EMUL_CONTINUE)
@@ -5198,16 +5206,21 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 
 		/* Instruction can only be executed in protected mode */
 		if ((ctxt->d & Prot) && ctxt->mode < X86EMUL_MODE_PROT16) {
+			pr_err_once("%s%d: emulate ud 5", __func__, __LINE__);
 			rc = emulate_ud(ctxt);
 			goto done;
 		}
 
 		/* Privileged instruction can be executed only in CPL=0 */
 		if ((ctxt->d & Priv) && ops->cpl(ctxt)) {
-			if (ctxt->d & PrivUD)
+			if (ctxt->d & PrivUD) {
+				pr_err_once("%s%d: emulate ud 6", __func__, __LINE__);
 				rc = emulate_ud(ctxt);
-			else
+			}
+			else {
+				pr_err_once("%s%d: emulate gp 1", __func__, __LINE__);
 				rc = emulate_gp(ctxt, 0);
+			}
 			goto done;
 		}
 
@@ -5219,6 +5232,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 		}
 
 		if (unlikely(is_guest_mode) && (ctxt->d & Intercept)) {
+			pr_err_once("%s%d: emulate emulator_check_intercept 2", __func__, __LINE__);
 			rc = emulator_check_intercept(ctxt, ctxt->intercept,
 						      X86_ICPT_POST_EXCEPT);
 			if (rc != X86EMUL_CONTINUE)
@@ -5228,6 +5242,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 		if (ctxt->rep_prefix && (ctxt->d & String)) {
 			/* All REP prefixes have the same first termination condition */
 			if (address_mask(ctxt, reg_read(ctxt, VCPU_REGS_RCX)) == 0) {
+				pr_err_once("%s%d: emulate emulator_check_intercept 3", __func__, __LINE__);
 				string_registers_quirk(ctxt);
 				ctxt->eip = ctxt->_eip;
 				ctxt->eflags &= ~X86_EFLAGS_RF;
@@ -5239,24 +5254,29 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	if ((ctxt->src.type == OP_MEM) && !(ctxt->d & NoAccess)) {
 		rc = segmented_read(ctxt, ctxt->src.addr.mem,
 				    ctxt->src.valptr, ctxt->src.bytes);
+		pr_err_once("%s%d: emulate segmented_read 1", __func__, __LINE__);
 		if (rc != X86EMUL_CONTINUE)
 			goto done;
 		ctxt->src.orig_val64 = ctxt->src.val64;
 	}
 
 	if (ctxt->src2.type == OP_MEM) {
+		pr_err_once("%s%d: emulate segmented_read 2", __func__, __LINE__);
 		rc = segmented_read(ctxt, ctxt->src2.addr.mem,
 				    &ctxt->src2.val, ctxt->src2.bytes);
 		if (rc != X86EMUL_CONTINUE)
 			goto done;
 	}
 
-	if ((ctxt->d & DstMask) == ImplicitOps)
+	if ((ctxt->d & DstMask) == ImplicitOps) {
+		pr_err_once("%s%d: emulate special_insn 1", __func__, __LINE__);
 		goto special_insn;
+	}
 
 
 	if ((ctxt->dst.type == OP_MEM) && !(ctxt->d & Mov)) {
 		/* optimisation - avoid slow emulated read if Mov */
+		pr_err_once("%s%d: emulate segmented_read 3", __func__, __LINE__);
 		rc = segmented_read(ctxt, ctxt->dst.addr.mem,
 				   &ctxt->dst.val, ctxt->dst.bytes);
 		if (rc != X86EMUL_CONTINUE) {
@@ -5271,8 +5291,10 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	ctxt->dst.orig_val64 = ctxt->dst.val64;
 
 special_insn:
+	pr_info("%s%d: special_insn 2", __func__, __LINE__);
 
 	if (unlikely(is_guest_mode) && (ctxt->d & Intercept)) {
+		pr_err_once("%s%d: emulate emulator_check_intercept 4", __func__, __LINE__);
 		rc = emulator_check_intercept(ctxt, ctxt->intercept,
 					      X86_ICPT_POST_MEMACCESS);
 		if (rc != X86EMUL_CONTINUE)
@@ -5285,8 +5307,10 @@ special_insn:
 		ctxt->eflags &= ~X86_EFLAGS_RF;
 
 	if (ctxt->execute) {
-		if (ctxt->d & Fastop)
+		if (ctxt->d & Fastop) {
+			pr_err_once("%s%d: emulate fastop 1", __func__, __LINE__);
 			rc = fastop(ctxt, ctxt->fop);
+		}
 		else
 			rc = ctxt->execute(ctxt);
 		if (rc != X86EMUL_CONTINUE)
@@ -5294,26 +5318,36 @@ special_insn:
 		goto writeback;
 	}
 
-	if (ctxt->opcode_len == 2)
+	if (ctxt->opcode_len == 2) {
+			pr_err_once("%s%d: emulate twobyte_insn 1", __func__, __LINE__);
 		goto twobyte_insn;
-	else if (ctxt->opcode_len == 3)
+	}
+	else if (ctxt->opcode_len == 3){
+		pr_err_once("%s%d: emulate threebyte_insn 1", __func__, __LINE__);
 		goto threebyte_insn;
+	}
 
+	pr_info("%s%d: special_insn 2 %#x", __func__, __LINE__, ctxt->b);
 	switch (ctxt->b) {
 	case 0x70 ... 0x7f: /* jcc (short) */
-		if (test_cc(ctxt->b, ctxt->eflags))
+		if (test_cc(ctxt->b, ctxt->eflags)){
 			rc = jmp_rel(ctxt, ctxt->src.val);
+			pr_err_once("%s%d: emulate jmp_rel 1", __func__, __LINE__);
+		}		
 		break;
 	case 0x8d: /* lea r16/r32, m */
+		pr_err_once("%s%d: emulate 0x8d 1", __func__, __LINE__);
 		ctxt->dst.val = ctxt->src.addr.mem.ea;
 		break;
 	case 0x90 ... 0x97: /* nop / xchg reg, rax */
+		pr_err_once("%s%d: emulate 0x90 1", __func__, __LINE__);
 		if (ctxt->dst.addr.reg == reg_rmw(ctxt, VCPU_REGS_RAX))
 			ctxt->dst.type = OP_NONE;
 		else
 			rc = em_xchg(ctxt);
 		break;
 	case 0x98: /* cbw/cwde/cdqe */
+		pr_err_once("%s%d: emulate 0x98 1", __func__, __LINE__);
 		switch (ctxt->op_bytes) {
 		case 2: ctxt->dst.val = (s8)ctxt->dst.val; break;
 		case 4: ctxt->dst.val = (s16)ctxt->dst.val; break;
@@ -5321,37 +5355,47 @@ special_insn:
 		}
 		break;
 	case 0xcc:		/* int3 */
+		pr_err_once("%s%d: emulate 0xcc 1", __func__, __LINE__);
 		rc = emulate_int(ctxt, 3);
 		break;
 	case 0xcd:		/* int n */
+		pr_err_once("%s%d: emulate 0xcd 1", __func__, __LINE__);
 		rc = emulate_int(ctxt, ctxt->src.val);
 		break;
 	case 0xce:		/* into */
+		pr_err_once("%s%d: emulate 0xce 1", __func__, __LINE__);
 		if (ctxt->eflags & X86_EFLAGS_OF)
 			rc = emulate_int(ctxt, 4);
 		break;
 	case 0xe9: /* jmp rel */
 	case 0xeb: /* jmp rel short */
+		pr_err_once("%s%d: emulate jmp_rel 2", __func__, __LINE__);
 		rc = jmp_rel(ctxt, ctxt->src.val);
 		ctxt->dst.type = OP_NONE; /* Disable writeback. */
 		break;
 	case 0xf4:              /* hlt */
+		pr_err_once("%s%d: emulate 0xf4 1", __func__, __LINE__);
 		ctxt->ops->halt(ctxt);
 		break;
 	case 0xf5:	/* cmc */
 		/* complement carry flag from eflags reg */
+		pr_err_once("%s%d: emulate 0xf5 1", __func__, __LINE__);
 		ctxt->eflags ^= X86_EFLAGS_CF;
 		break;
 	case 0xf8: /* clc */
+		pr_err_once("%s%d: emulate 0xf8 1", __func__, __LINE__);
 		ctxt->eflags &= ~X86_EFLAGS_CF;
 		break;
 	case 0xf9: /* stc */
+		pr_err_once("%s%d: emulate 0xf9 1", __func__, __LINE__);
 		ctxt->eflags |= X86_EFLAGS_CF;
 		break;
 	case 0xfc: /* cld */
+		pr_err_once("%s%d: emulate 0xfc 1", __func__, __LINE__);
 		ctxt->eflags &= ~X86_EFLAGS_DF;
 		break;
 	case 0xfd: /* std */
+		pr_err_once("%s%d: emulate 0xfd 2", __func__, __LINE__);
 		ctxt->eflags |= X86_EFLAGS_DF;
 		break;
 	default:
@@ -5362,6 +5406,7 @@ special_insn:
 		goto done;
 
 writeback:
+	pr_info("%s%d: writeback 1", __func__, __LINE__);
 	if (ctxt->d & SrcWrite) {
 		BUG_ON(ctxt->src.type == OP_MEM || ctxt->src.type == OP_MEM_STR);
 		rc = writeback(ctxt, &ctxt->src);
@@ -5421,6 +5466,7 @@ writeback:
 		ctxt->eip = (u32)ctxt->_eip;
 
 done:
+	pr_info("%s%d: done 1", __func__, __LINE__);
 	if (rc == X86EMUL_PROPAGATE_FAULT) {
 		if (KVM_EMULATOR_BUG_ON(ctxt->exception.vector > 0x1f, ctxt))
 			return EMULATION_FAILED;
@@ -5435,6 +5481,7 @@ done:
 	return (rc == X86EMUL_UNHANDLEABLE) ? EMULATION_FAILED : EMULATION_OK;
 
 twobyte_insn:
+	pr_info("%s%d: twobyte_insn 2 %#x", __func__, __LINE__, ctxt->b);
 	switch (ctxt->b) {
 	case 0x09:		/* wbinvd */
 		(ctxt->ops->wbinvd)(ctxt);

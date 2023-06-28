@@ -44,6 +44,7 @@
 
 #include <asm/kvm_host.h>
 #include <linux/kvm_dirty_ring.h>
+#include <linux/atomic.h>
 
 #ifndef KVM_MAX_VCPU_IDS
 #define KVM_MAX_VCPU_IDS KVM_MAX_VCPUS
@@ -317,7 +318,36 @@ struct kvm_mmio_fragment {
 	unsigned len;
 };
 
+/*
+ * Custom tracking of KVM stack from VM exits
+ */
+struct tracking_data {
+	atomic_t fast_reentry;
+	atomic_t slow_reentry;
+	// An exit via HLT was resolved with a call to 'kvm_inject_pending_timer_irqs'
+	atomic_t hlt;
+	// An exit via HLT was resolved with a call to 'kvm_inject_pending_timer_irqs'
+	atomic_t hlt_timer;
+	// An exit via HLT was resolved with an incoming irq not the timer
+	atomic_t hlt_irq;
+	// A HLT was resolved by another means than above
+	atomic_t hlt_other;
+};
+static __always_inline void vcpu_entry_print(int vcpu_id, struct tracking_data *data)
+{
+	// pr_info("%s%d: vcpu running %d", __func__, __LINE__, vcpu->vcpu_id);
+	pr_err_once("vcpu entry %d fr: %d sr: %d h: %d ht:%d hi:%d ho:%d", vcpu_id, 
+			atomic_read(&data->fast_reentry),
+			atomic_read(&data->slow_reentry),
+			atomic_read(&data->hlt),
+			atomic_read(&data->hlt_timer),
+			atomic_read(&data->hlt_irq),
+			atomic_read(&data->hlt_other));
+}
+
 struct kvm_vcpu {
+	struct tracking_data tracking;
+	
 	struct kvm *kvm;
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	struct preempt_notifier preempt_notifier;

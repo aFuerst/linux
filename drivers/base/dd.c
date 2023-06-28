@@ -573,10 +573,14 @@ static int call_driver_probe(struct device *dev, struct device_driver *drv)
 {
 	int ret = 0;
 
-	if (dev->bus->probe)
+	if (dev->bus->probe) {
+		pr_info("%s%d: dev->bus->probe == %p", __func__, __LINE__, dev->bus->probe);
 		ret = dev->bus->probe(dev);
-	else if (drv->probe)
+	}
+	else if (drv->probe) {
+		pr_info("%s%d: drv->probe == %p", __func__, __LINE__, drv->probe);
 		ret = drv->probe(dev);
+	}
 
 	switch (ret) {
 	case 0:

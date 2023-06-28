@@ -61,6 +61,7 @@
 #include <linux/entry-kvm.h>
 #include <linux/suspend.h>
 #include <linux/smp.h>
+#include <linux/atomic.h>
 
 #include <trace/events/ipi.h>
 #include <trace/events/kvm.h>
@@ -8850,6 +8851,7 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 	int r;
 	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 	bool writeback = true;
+	pr_err_once("%s%d: x86_emulate_instruction", __func__, __LINE__);
 
 	if (unlikely(!kvm_can_emulate_insn(vcpu, emulation_type, insn, insn_len)))
 		return 1;
@@ -8934,6 +8936,7 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 	}
 
 restart:
+	pr_err_once("%s%d: x86_emulate_instruction restart", __func__, __LINE__);
 	if (emulation_type & EMULTYPE_PF) {
 		/* Save the faulting GPA (cr2) in the address field */
 		ctxt->exception.address = cr2_or_gpa;
@@ -8990,6 +8993,7 @@ restart:
 		r = 1;
 
 writeback:
+	pr_err_once("%s%d: x86_emulate_instruction writeback", __func__, __LINE__);
 	if (writeback) {
 		unsigned long rflags = static_call(kvm_x86_get_rflags)(vcpu);
 		toggle_interruptibility(vcpu, ctxt->interruptibility);
@@ -9023,6 +9027,7 @@ writeback:
 	} else
 		vcpu->arch.emulate_regs_need_sync_to_vcpu = true;
 
+	pr_err_once("%s%d: x86_emulate_instruction %d", __func__, __LINE__, r);
 	return r;
 }
 
@@ -10747,6 +10752,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		WARN_ON_ONCE((kvm_vcpu_apicv_activated(vcpu) != kvm_vcpu_apicv_active(vcpu)) &&
 			     (kvm_get_apic_mode(vcpu) != LAPIC_MODE_DISABLED));
 
+		vcpu_entry_print(vcpu->vcpu_id, &vcpu->tracking);
 		exit_fastpath = static_call(kvm_x86_vcpu_run)(vcpu);
 		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
 			break;
@@ -10761,7 +10767,10 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 		/* Note, VM-Exits that go down the "slow" path are accounted below. */
 		++vcpu->stat.exits;
+		// continuing loop means fast entry
+		atomic_inc(&vcpu->tracking.fast_reentry);
 	}
+	atomic_inc(&vcpu->tracking.slow_reentry);
 
 	/*
 	 * Do this here before restoring debug registers on the host.  And
@@ -10941,6 +10950,8 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 	vcpu->arch.l1tf_flush_l1d = true;
 
 	for (;;) {
+		bool blocked = false;
+		bool handled = false;
 		/*
 		 * If another guest vCPU requests a PV TLB flush in the middle
 		 * of instruction emulation, the rest of the emulation could
@@ -10952,20 +10963,34 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 			r = vcpu_enter_guest(vcpu);
 		} else {
 			r = vcpu_block(vcpu);
+			atomic_inc(&vcpu->tracking.hlt);
+			blocked = true;
 		}
 
-		if (r <= 0)
+		if (r <= 0) {
 			break;
+		}
 
 		kvm_clear_request(KVM_REQ_UNBLOCK, vcpu);
 		if (kvm_xen_has_pending_events(vcpu))
 			kvm_xen_inject_pending_events(vcpu);
 
-		if (kvm_cpu_has_pending_timer(vcpu))
+		if (kvm_cpu_has_pending_timer(vcpu)) {
 			kvm_inject_pending_timer_irqs(vcpu);
+			if (blocked) {
+				atomic_inc(&vcpu->tracking.hlt_timer);
+				handled = true;
+			}
+		}
 
 		if (dm_request_for_irq_injection(vcpu) &&
 			kvm_vcpu_ready_for_interrupt_injection(vcpu)) {
+			if (blocked) {
+				// nevere hit
+				atomic_inc(&vcpu->tracking.hlt_irq);
+				handled = true;
+			}
+
 			r = 0;
 			vcpu->run->exit_reason = KVM_EXIT_IRQ_WINDOW_OPEN;
 			++vcpu->stat.request_irq_exits;
@@ -10978,6 +11003,9 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 			kvm_vcpu_srcu_read_lock(vcpu);
 			if (r)
 				return r;
+		}
+		if (!handled && blocked) {
+			atomic_inc(&vcpu->tracking.hlt_other);
 		}
 	}
 

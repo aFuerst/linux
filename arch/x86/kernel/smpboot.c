@@ -1836,9 +1836,18 @@ void __noreturn hlt_play_dead(void)
 	}
 }
 
+void jmp_vmm_vcpu(void) {
+	while (true) {
+		int x = 1;
+		++x;
+		x--;
+	}
+}
+
 void native_play_dead(void)
 {
 	play_dead_common();
+	jmp_vmm_vcpu();
 	tboot_shutdown(TB_SHUTDOWN_WFS);
 
 	mwait_play_dead();
