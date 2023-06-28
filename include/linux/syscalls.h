@@ -790,6 +790,8 @@ asmlinkage long sys_getgid(void);
 asmlinkage long sys_getegid(void);
 asmlinkage long sys_gettid(void);
 asmlinkage long sys_sysinfo(struct sysinfo __user *info);
+asmlinkage long sys_vm_orphan(uint cpu, int test);
+asmlinkage long sys_vm_adopt(uint cpu, int test);
 
 /* ipc/mqueue.c */
 asmlinkage long sys_mq_open(const char __user *name, int oflag, umode_t mode, struct mq_attr __user *attr);

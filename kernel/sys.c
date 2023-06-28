@@ -2873,3 +2873,15 @@ COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
 	return 0;
 }
 #endif /* CONFIG_COMPAT */
+
+SYSCALL_DEFINE2(vm_orphan, uint, cpu, int, test)
+{
+	pr_info("%s%d vmorphan syscall %d", __func__, __LINE__, cpu);
+	return 0;
+}
+
+SYSCALL_DEFINE2(vm_adopt, uint, cpu, int, test)
+{
+	pr_info("%s%d vmadopt syscall %d", __func__, __LINE__, cpu);
+	return 0;
+}

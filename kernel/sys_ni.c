@@ -186,6 +186,8 @@ COND_SYSCALL(setfsuid);
 COND_SYSCALL(setfsgid);
 COND_SYSCALL(setgroups);
 COND_SYSCALL(getgroups);
+COND_SYSCALL(vm_orphan);
+COND_SYSCALL(vm_adopt);
 
 /* kernel/time.c */
 
