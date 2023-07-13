@@ -5142,7 +5142,9 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	int rc = X86EMUL_CONTINUE;
 	int saved_dst_type = ctxt->dst.type;
 	bool is_guest_mode = ctxt->ops->is_guest_mode(ctxt);
-	pr_info("%s%d: emulating instruction", __func__, __LINE__);
+	#ifdef CUST_DBG_LOGS
+	trace_printk("%s%d: emulating instruction", __func__, __LINE__);
+	#endif
 	
 	ctxt->mem_read.pos = 0;
 

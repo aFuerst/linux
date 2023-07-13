@@ -2382,7 +2382,7 @@ static int apic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 	struct kvm_lapic *apic = to_lapic(this);
 	unsigned int offset = address - apic->base_address;
 	u32 val;
-	pr_info("%s%d: lapic_mmio_write", __func__, __LINE__);
+	// pr_info("%s%d: lapic_mmio_write", __func__, __LINE__);
 
 	if (!apic_mmio_in_range(apic, address))
 		return -EOPNOTSUPP;
@@ -2412,7 +2412,7 @@ static int apic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 
 void kvm_lapic_set_eoi(struct kvm_vcpu *vcpu)
 {
-	pr_info("%s%d: lapic_set_eoi", __func__, __LINE__);
+	// pr_info("%s%d: lapic_set_eoi", __func__, __LINE__);
 	kvm_lapic_reg_write(vcpu->arch.apic, APIC_EOI, 0);
 }
 EXPORT_SYMBOL_GPL(kvm_lapic_set_eoi);
@@ -2422,7 +2422,7 @@ void kvm_apic_write_nodecode(struct kvm_vcpu *vcpu, u32 offset)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
 	u64 val;
-	pr_info("%s%d: lapic_write_netcode", __func__, __LINE__);
+	// pr_info("%s%d: lapic_write_netcode", __func__, __LINE__);
 
 	/*
 	 * ICR is a single 64-bit register when x2APIC is enabled.  For legacy
@@ -3148,7 +3148,7 @@ static int kvm_lapic_msr_read(struct kvm_lapic *apic, u32 reg, u64 *data)
 
 static int kvm_lapic_msr_write(struct kvm_lapic *apic, u32 reg, u64 data)
 {
-	pr_info("%s%d: lapic_msr_write", __func__, __LINE__);
+	// pr_info("%s%d: lapic_msr_write", __func__, __LINE__);
 	/*
 	 * ICR is a 64-bit register in x2APIC mode (and Hyper-V PV vAPIC) and
 	 * can be written as such, all other registers remain accessible only

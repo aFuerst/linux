@@ -924,8 +924,9 @@ static bool set_nr_if_polling(struct task_struct *p)
 			return false;
 		if (val & _TIF_NEED_RESCHED)
 			return true;
-		if (try_cmpxchg(&ti->flags, &val, val | _TIF_NEED_RESCHED))
+		if (try_cmpxchg(&ti->flags, &val, val | _TIF_NEED_RESCHED)) {
 			break;
+		}
 	}
 	return true;
 }
@@ -1049,6 +1050,9 @@ void resched_curr(struct rq *rq)
 		return;
 
 	cpu = cpu_of(rq);
+	// if (cpu == 24) {
+	// 	trace_printk("resched_curr 24");
+	// }
 
 	if (cpu == smp_processor_id()) {
 		set_tsk_need_resched(curr);
@@ -3860,6 +3864,9 @@ void sched_ttwu_pending(void *arg)
  */
 bool call_function_single_prep_ipi(int cpu)
 {
+	// if (cpu == 24) {
+	// 	trace_printk("set & sending reschedule IPI");
+	// }
 	if (set_nr_if_polling(cpu_rq(cpu)->idle)) {
 		trace_sched_wake_idle_without_ipi(cpu);
 		return false;

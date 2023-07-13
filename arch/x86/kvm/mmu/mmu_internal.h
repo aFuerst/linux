@@ -315,10 +315,10 @@ static inline int kvm_mmu_do_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 		vcpu->stat.pf_taken++;
 
 	if (IS_ENABLED(CONFIG_RETPOLINE) && fault.is_tdp) {
-		pr_info("%s%d: kvm_mmu_do_page_fault:kvm_tdp_page_fault", __func__, __LINE__);
+		// pr_info("%s%d: kvm_mmu_do_page_fault:kvm_tdp_page_fault", __func__, __LINE__);
 		r = kvm_tdp_page_fault(vcpu, &fault);
 	} else {
-		pr_info("%s%d: kvm_mmu_do_page_fault:arch.mmu->page_fault is_tdp: %d", __func__, __LINE__, fault.is_tdp);
+		// pr_info("%s%d: kvm_mmu_do_page_fault:arch.mmu->page_fault is_tdp: %d", __func__, __LINE__, fault.is_tdp);
 		r = vcpu->arch.mmu->page_fault(vcpu, &fault);
 	}
 	if (fault.write_fault_to_shadow_pgtable && emulation_type)

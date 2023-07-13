@@ -4481,28 +4481,30 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu *vcpu,
 				  struct kvm_page_fault *fault)
 {
 	int r;
-	pr_info("%s%d: here!!!", __func__, __LINE__);
+	#ifdef CUST_DBG_LOGS
+	trace_printk("%s%d: here!!!\n", __func__, __LINE__);
+	#endif
 
 	if (page_fault_handle_page_track(vcpu, fault)){
-		pr_info("%s%d: kvm_tdp_mmu_page_fault:page_fault_handle_page_track", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_mmu_page_fault:page_fault_handle_page_track", __func__, __LINE__);
 		return RET_PF_EMULATE;
 	}
 
 	r = fast_page_fault(vcpu, fault);
 	if (r != RET_PF_INVALID){
-		pr_info("%s%d: kvm_tdp_mmu_page_fault:fast_page_fault", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_mmu_page_fault:fast_page_fault", __func__, __LINE__);
 		return r;
 	}
 
 	r = mmu_topup_memory_caches(vcpu, false);
 	if (r){
-		pr_info("%s%d: kvm_tdp_mmu_page_fault:mmu_topup_memory_caches", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_mmu_page_fault:mmu_topup_memory_caches", __func__, __LINE__);
 		return r;
 	}
 
 	r = kvm_faultin_pfn(vcpu, fault, ACC_ALL);
 	if (r != RET_PF_CONTINUE){
-		pr_info("%s%d: kvm_tdp_mmu_page_fault:kvm_faultin_pfn", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_mmu_page_fault:kvm_faultin_pfn", __func__, __LINE__);
 		return r;
 	}
 
@@ -4510,17 +4512,17 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu *vcpu,
 	read_lock(&vcpu->kvm->mmu_lock);
 
 	if (is_page_fault_stale(vcpu, fault)) {
-		pr_info("%s%d: kvm_tdp_mmu_page_fault:stale", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_mmu_page_fault:stale", __func__, __LINE__);
 		goto out_unlock;
 	}
 
 	r = kvm_tdp_mmu_map(vcpu, fault);
-	pr_info("%s%d: kvm_tdp_mmu_page_fault:kvm_tdp_mmu_map", __func__, __LINE__);
+	// pr_info("%s%d: kvm_tdp_mmu_page_fault:kvm_tdp_mmu_map", __func__, __LINE__);
 
 out_unlock:
 	read_unlock(&vcpu->kvm->mmu_lock);
 	kvm_release_pfn_clean(fault->pfn);
-	pr_info("%s%d: kvm_tdp_mmu_page_fault:bottom", __func__, __LINE__);
+	// pr_info("%s%d: kvm_tdp_mmu_page_fault:bottom", __func__, __LINE__);
 	return r;
 }
 #endif
@@ -4553,12 +4555,12 @@ int kvm_tdp_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 #ifdef CONFIG_X86_64
 	if (tdp_mmu_enabled)
 	{
-		pr_info("%s%d: kvm_tdp_page_fault:kvm_tdp_mmu_page_fault", __func__, __LINE__);
+		// pr_info("%s%d: kvm_tdp_page_fault:kvm_tdp_mmu_page_fault", __func__, __LINE__);
 		return kvm_tdp_mmu_page_fault(vcpu, fault);
 	}
 #endif
 
-	pr_info("%s%d: kvm_tdp_page_fault:direct_page_fault", __func__, __LINE__);
+	// pr_info("%s%d: kvm_tdp_page_fault:direct_page_fault", __func__, __LINE__);
 	return direct_page_fault(vcpu, fault);
 }
 
@@ -5752,20 +5754,20 @@ int noinline kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa, u64 err
 	int r, emulation_type = EMULTYPE_PF;
 	bool direct = vcpu->arch.mmu->root_role.direct;
 
-	pr_info("%s%d: inside kvm_mmu_page_fault", __func__, __LINE__);
+	// pr_info("%s%d: inside kvm_mmu_page_fault", __func__, __LINE__);
 	if (WARN_ON(!VALID_PAGE(vcpu->arch.mmu->root.hpa)))
 		return RET_PF_RETRY;
 
 	r = RET_PF_INVALID;
 	if (unlikely(error_code & PFERR_RSVD_MASK)) {
-		pr_info("%s%d: kvm_mmu_page_fault:handle_mmio_page_fault", __func__, __LINE__);
+		// pr_info("%s%d: kvm_mmu_page_fault:handle_mmio_page_fault", __func__, __LINE__);
 		r = handle_mmio_page_fault(vcpu, cr2_or_gpa, direct);
 		if (r == RET_PF_EMULATE)
 			goto emulate;
 	}
 
 	if (r == RET_PF_INVALID) {
-		pr_info("%s%d: kvm_mmu_page_fault:kvm_mmu_do_page_fault", __func__, __LINE__);
+		// pr_info("%s%d: kvm_mmu_page_fault:kvm_mmu_do_page_fault", __func__, __LINE__);
 		r = kvm_mmu_do_page_fault(vcpu, cr2_or_gpa,
 					  lower_32_bits(error_code), false,
 					  &emulation_type);
@@ -5787,7 +5789,7 @@ int noinline kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa, u64 err
 	 */
 	if (vcpu->arch.mmu->root_role.direct &&
 	    (error_code & PFERR_NESTED_GUEST_PAGE) == PFERR_NESTED_GUEST_PAGE) {
-		pr_info("%s%d: kvm_mmu_page_fault:kvm_mmu_unprotect_page", __func__, __LINE__);
+		// pr_info("%s%d: kvm_mmu_page_fault:kvm_mmu_unprotect_page", __func__, __LINE__);
 		kvm_mmu_unprotect_page(vcpu->kvm, gpa_to_gfn(cr2_or_gpa));
 		return 1;
 	}
@@ -5806,7 +5808,7 @@ int noinline kvm_mmu_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa, u64 err
 	if (!mmio_info_in_cache(vcpu, cr2_or_gpa, direct) && !is_guest_mode(vcpu))
 		emulation_type |= EMULTYPE_ALLOW_RETRY_PF;
 emulate:
-	pr_info("%s%d: kvm_mmu_page_fault:x86_emulate_instruction", __func__, __LINE__);
+	// pr_info("%s%d: kvm_mmu_page_fault:x86_emulate_instruction", __func__, __LINE__);
 	return x86_emulate_instruction(vcpu, cr2_or_gpa, emulation_type, insn,
 				       insn_len);
 }

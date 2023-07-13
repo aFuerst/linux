@@ -138,6 +138,11 @@ ifeq ("$(origin M)", "command line")
   KBUILD_EXTMOD := $(M)
 endif
 
+# CUST CONFIG DON"T USE
+ifeq ($(CONFIG_CUST_DBG_LOGS),y)
+KBUILD_CFLAGS   += -DCUST_DBG_LOGS=1  # CUST_DBG_LOGS now '1' in C files.
+endif
+
 $(if $(word 2, $(KBUILD_EXTMOD)), \
 	$(error building multiple external modules is not supported))
 

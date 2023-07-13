@@ -194,22 +194,26 @@ static int __init housekeeping_isolcpus_setup(char *str)
 	bool illegal = false;
 	char *par;
 	int len;
+	pr_info("isolcpus: parsing isolcpus kernel command line settings '%s'\n", str);
 
 	while (isalpha(*str)) {
 		if (!strncmp(str, "nohz,", 5)) {
 			str += 5;
+			pr_info("isolcpus: nohz setting\n");
 			flags |= HK_FLAG_TICK;
 			continue;
 		}
 
 		if (!strncmp(str, "domain,", 7)) {
 			str += 7;
+			pr_info("isolcpus: domain setting\n");
 			flags |= HK_FLAG_DOMAIN;
 			continue;
 		}
 
 		if (!strncmp(str, "managed_irq,", 12)) {
 			str += 12;
+			pr_info("isolcpus: managed_irq setting\n");
 			flags |= HK_FLAG_MANAGED_IRQ;
 			continue;
 		}
@@ -224,7 +228,7 @@ static int __init housekeeping_isolcpus_setup(char *str)
 		}
 
 		if (illegal) {
-			pr_warn("isolcpus: Invalid flag %.*s\n", len, par);
+			pr_info("isolcpus: Invalid flag %.*s\n", len, par);
 			return 0;
 		}
 

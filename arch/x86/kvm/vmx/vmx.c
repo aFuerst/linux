@@ -1765,9 +1765,19 @@ static void vmx_clear_hlt(struct kvm_vcpu *vcpu)
 
 static void vmx_inject_exception(struct kvm_vcpu *vcpu)
 {
+	#ifdef CUST_DBG_LOGS
+	static int call_cnt = 0;
+	#endif
 	struct kvm_queued_exception *ex = &vcpu->arch.exception;
 	u32 intr_info = ex->vector | INTR_INFO_VALID_MASK;
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	#ifdef CUST_DBG_LOGS
+	bool pr = false;
+	if ((++call_cnt)%100 == 0) {
+		pr = true;
+		trace_printk("vmx_inject_exception irq = %d\n", intr_info);
+	}
+	#endif
 
 	kvm_deliver_exception_payload(vcpu, ex);
 
@@ -1791,6 +1801,11 @@ static void vmx_inject_exception(struct kvm_vcpu *vcpu)
 		if (kvm_exception_is_soft(ex->vector))
 			inc_eip = vcpu->arch.event_exit_inst_len;
 		kvm_inject_realmode_interrupt(vcpu, ex->vector, inc_eip);
+		#ifdef CUST_DBG_LOGS
+		if (pr) {
+			trace_printk("vmx_inject_exception kvm_inject_realmode_interrupt\n");
+		}
+		#endif
 		return;
 	}
 
@@ -1799,11 +1814,25 @@ static void vmx_inject_exception(struct kvm_vcpu *vcpu)
 	if (kvm_exception_is_soft(ex->vector)) {
 		vmcs_write32(VM_ENTRY_INSTRUCTION_LEN,
 			     vmx->vcpu.arch.event_exit_inst_len);
+	#ifdef CUST_DBG_LOGS
+		if (pr)
+			trace_printk("vmx_inject_exception vmcs_write32 soft\n");
+	#endif
+
 		intr_info |= INTR_TYPE_SOFT_EXCEPTION;
-	} else
+	} else {
 		intr_info |= INTR_TYPE_HARD_EXCEPTION;
+		#ifdef CUST_DBG_LOGS
+		if (pr)
+			trace_printk("vmx_inject_exception vmcs_write32 hard\n");
+		#endif
+	}
 
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, intr_info);
+	#ifdef CUST_DBG_LOGS
+	if (pr)
+		trace_printk("vmx_inject_exception vmcs_write32 write\n");
+	#endif
 
 	vmx_clear_hlt(vcpu);
 }
@@ -4891,9 +4920,19 @@ static void vmx_enable_nmi_window(struct kvm_vcpu *vcpu)
 
 static void vmx_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 {
+	#ifdef CUST_DBG_LOGS
+	static int call_cnt = 0;
+	#endif
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	uint32_t intr;
 	int irq = vcpu->arch.interrupt.nr;
+	#ifdef CUST_DBG_LOGS
+	bool pr = false;
+	if ((++call_cnt)%100 == 0) {
+		pr = true;
+		trace_printk("vmx_inject_irq irq = %d\n", irq);
+	}
+	#endif
 
 	trace_kvm_inj_virq(irq, vcpu->arch.interrupt.soft, reinjected);
 
@@ -4902,17 +4941,31 @@ static void vmx_inject_irq(struct kvm_vcpu *vcpu, bool reinjected)
 		int inc_eip = 0;
 		if (vcpu->arch.interrupt.soft)
 			inc_eip = vcpu->arch.event_exit_inst_len;
+	#ifdef CUST_DBG_LOGS
+		if (pr)
+			trace_printk("vmx_inject_irq kvm_inject_realmode_interrupt\n");
+	#endif
 		kvm_inject_realmode_interrupt(vcpu, irq, inc_eip);
 		return;
 	}
 	intr = irq | INTR_INFO_VALID_MASK;
 	if (vcpu->arch.interrupt.soft) {
 		intr |= INTR_TYPE_SOFT_INTR;
+	#ifdef CUST_DBG_LOGS
+		if (pr)
+			trace_printk("vmx_inject_irq vmcs_write32 1\n");
+	#endif
+
 		vmcs_write32(VM_ENTRY_INSTRUCTION_LEN,
 			     vmx->vcpu.arch.event_exit_inst_len);
 	} else
 		intr |= INTR_TYPE_EXT_INTR;
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, intr);
+
+	#ifdef CUST_DBG_LOGS
+	if (pr)
+		trace_printk("vmx_inject_irq vmcs_write32 2\n");
+	#endif
 
 	vmx_clear_hlt(vcpu);
 }
@@ -5725,7 +5778,9 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(vcpu, gpa, exit_qualification);
-	pr_info("%s%d: trace_kvm_page_fault", __func__, __LINE__);
+	#ifdef CUST_DBG_LOGS
+	trace_printk("%s%d: trace_kvm_page_fault\n", __func__, __LINE__);
+	#endif
 
 	/* Is it a read fault? */
 	error_code = (exit_qualification & EPT_VIOLATION_ACC_READ)
@@ -6380,6 +6435,10 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	union vmx_exit_reason exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
 	u16 exit_handler_index;
+	int r;
+	#ifdef CUST_DBG_LOGS
+	static int cnt = 0;
+	#endif
 
 	/*
 	 * Flush logged GPAs PML buffer, this will make dirty_bitmap more
@@ -6516,22 +6575,23 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	if (exit_fastpath != EXIT_FASTPATH_NONE)
 		return 1;
 
+
 	if (exit_reason.basic >= kvm_vmx_max_exit_handlers)
 		goto unexpected_vmexit;
-#ifdef CONFIG_RETPOLINE
-	if (exit_reason.basic == EXIT_REASON_MSR_WRITE)
-		return kvm_emulate_wrmsr(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_PREEMPTION_TIMER)
-		return handle_preemption_timer(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_INTERRUPT_WINDOW)
-		return handle_interrupt_window(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_EXTERNAL_INTERRUPT)
-		return handle_external_interrupt(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_HLT)
-		return kvm_emulate_halt(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_EPT_MISCONFIG)
-		return handle_ept_misconfig(vcpu);
-#endif
+// #ifdef CONFIG_RETPOLINE
+// 	if (exit_reason.basic == EXIT_REASON_MSR_WRITE)
+// 		return kvm_emulate_wrmsr(vcpu);
+// 	else if (exit_reason.basic == EXIT_REASON_PREEMPTION_TIMER)
+// 		return handle_preemption_timer(vcpu);
+// 	else if (exit_reason.basic == EXIT_REASON_INTERRUPT_WINDOW)
+// 		return handle_interrupt_window(vcpu);
+// 	else if (exit_reason.basic == EXIT_REASON_EXTERNAL_INTERRUPT)
+// 		return handle_external_interrupt(vcpu);
+// 	else if (exit_reason.basic == EXIT_REASON_HLT)
+// 		return kvm_emulate_halt(vcpu);
+// 	else if (exit_reason.basic == EXIT_REASON_EPT_MISCONFIG)
+// 		return handle_ept_misconfig(vcpu);
+// #endif
 
 	exit_handler_index = array_index_nospec((u16)exit_reason.basic,
 						kvm_vmx_max_exit_handlers);
@@ -6539,7 +6599,13 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		goto unexpected_vmexit;
 
 	pr_err_once("%s%d: kvm_vmx_exit_handlers[%d]", __func__, __LINE__, exit_handler_index);
-	return kvm_vmx_exit_handlers[exit_handler_index](vcpu);
+	r = kvm_vmx_exit_handlers[exit_handler_index](vcpu);
+	#ifdef CUST_DBG_LOGS
+	if (++cnt % 100 == 0) {
+		trace_printk("jumping to exit handler, basic reason: %d; handler return: %d\n", exit_reason.basic, r);
+	}
+	#endif
+	return r;
 
 unexpected_vmexit:
 	vcpu_unimpl(vcpu, "vmx: unexpected exit reason 0x%x\n",
@@ -7197,6 +7263,8 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
+	u64 info[5];
+	// static int call_cnt = 0;
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long cr3, cr4;
 
@@ -7343,6 +7411,17 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
 
 	trace_kvm_exit(vcpu, KVM_ISA_VMX);
+	
+	memset(&info, 0, sizeof(info));
+	static_call(kvm_x86_get_exit_info)(vcpu, (u32 *)&info[0], &info[1],
+					   &info[2], (u32 *)&info[3],
+					   (u32 *)&info[4]);
+	// if (++call_cnt % 100 == 0) {
+	#ifdef CUST_DBG_LOGS
+	trace_printk("vm exit reason, actual: %llu; exit_reason.full: %u\n", info[0], vmx->exit_reason.full); //, EXIT_REASON_EXTERNAL_INTERRUPT);
+	#endif
+		// dump_stack();
+	// }
 
 	if (unlikely(vmx->exit_reason.failed_vmentry))
 		return EXIT_FASTPATH_NONE;

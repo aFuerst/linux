@@ -632,6 +632,18 @@ static int finish_cpu(unsigned int cpu)
  */
 
 /*
+ * True to skip the specified state in orphaning a core
+ */
+static bool orphan_skip_state(enum cpuhp_state state) {
+	trace_printk("testing state %d\n", state);
+	switch (state) {
+
+		default:
+			return false;
+	};
+}
+
+/*
  * Get the next state to run. Empty ones will be skipped. Returns true if a
  * state must be run.
  *
@@ -655,9 +667,11 @@ static bool cpuhp_next_state(bool bringup,
 
 			*state_to_run = st->state--;
 		}
+		if (!cpuhp_step_empty(bringup, cpuhp_get_step(*state_to_run))) {
+			if (!orphan_skip_state(*state_to_run))
+				break;
+		}
 
-		if (!cpuhp_step_empty(bringup, cpuhp_get_step(*state_to_run)))
-			break;
 	} while (true);
 
 	return true;

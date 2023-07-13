@@ -10482,6 +10482,7 @@ EXPORT_SYMBOL_GPL(__kvm_request_immediate_exit);
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	int r;
+    u64 info[5];
 	bool req_int_win =
 		dm_request_for_irq_injection(vcpu) &&
 		kvm_cpu_accept_dm_intr(vcpu);
@@ -10769,7 +10770,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		++vcpu->stat.exits;
 		// continuing loop means fast entry
 		atomic_inc(&vcpu->tracking.fast_reentry);
-	}
+	}	
 	atomic_inc(&vcpu->tracking.slow_reentry);
 
 	/*
@@ -10806,13 +10807,21 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	 * rely on the fact that guest_fpu::xfd is up-to-date (e.g.
 	 * in #NM irqoff handler).
 	 */
-	if (vcpu->arch.xfd_no_write_intercept)
+	if (vcpu->arch.xfd_no_write_intercept) {
+	#ifdef CUST_DBG_LOGS
+        trace_printk("xfd_no_write_intercept\n");
+    #endif
 		fpu_sync_guest_vmexit_xfd_state();
+    }
 
 	static_call(kvm_x86_handle_exit_irqoff)(vcpu);
 
-	if (vcpu->arch.guest_fpu.xfd_err)
+	if (vcpu->arch.guest_fpu.xfd_err) {
+	#ifdef CUST_DBG_LOGS
+        trace_printk("wrmsrl MSR_IA32_XFD_ERR\n");
+        #endif
 		wrmsrl(MSR_IA32_XFD_ERR, 0);
+    }
 
 	/*
 	 * Consume any pending interrupts, including the possible source of
@@ -10846,16 +10855,34 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	 */
 	if (unlikely(prof_on == KVM_PROFILING)) {
 		unsigned long rip = kvm_rip_read(vcpu);
+	#ifdef CUST_DBG_LOGS
+        trace_printk("profile\n");
+        #endif
 		profile_hit(KVM_PROFILING, (void *)rip);
 	}
 
-	if (unlikely(vcpu->arch.tsc_always_catchup))
+	if (unlikely(vcpu->arch.tsc_always_catchup)) {
+	#ifdef CUST_DBG_LOGS
+        trace_printk("tsc_always_catchup\n");
+        #endif
 		kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
+    }
 
-	if (vcpu->arch.apic_attention)
+	if (vcpu->arch.apic_attention) {
+	#ifdef CUST_DBG_LOGS
+        trace_printk("apic attention\n");
+        #endif
 		kvm_lapic_sync_from_vapic(vcpu);
+    }
 
 	r = static_call(kvm_x86_handle_exit)(vcpu, exit_fastpath);
+    memset(&info, 0, sizeof(info));
+	static_call(kvm_x86_get_exit_info)(vcpu, (u32 *)&info[0], &info[1],
+					   &info[2], (u32 *)&info[3],
+					   (u32 *)&info[4]);
+	#ifdef CUST_DBG_LOGS
+    trace_printk("slow path vm exit; intr_info: %llu; vcpu->run->exit_reason: %d\n", info[0], vcpu->run->exit_reason);
+    #endif
 	return r;
 
 cancel_injection:
@@ -10960,8 +10987,14 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 		 */
 		vcpu->arch.at_instruction_boundary = false;
 		if (kvm_vcpu_running(vcpu)) {
+	#ifdef CUST_DBG_LOGS
+            trace_printk("slow exit, re-enter\n");
+            #endif
 			r = vcpu_enter_guest(vcpu);
 		} else {
+	#ifdef CUST_DBG_LOGS
+            trace_printk("slow exit, block\n");
+            #endif
 			r = vcpu_block(vcpu);
 			atomic_inc(&vcpu->tracking.hlt);
 			blocked = true;
@@ -10972,10 +11005,17 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 		}
 
 		kvm_clear_request(KVM_REQ_UNBLOCK, vcpu);
-		if (kvm_xen_has_pending_events(vcpu))
+		if (kvm_xen_has_pending_events(vcpu)) {
+	#ifdef CUST_DBG_LOGS
+            trace_printk("slow exit, inject xen event\n");
+            #endif
 			kvm_xen_inject_pending_events(vcpu);
+        }
 
 		if (kvm_cpu_has_pending_timer(vcpu)) {
+	#ifdef CUST_DBG_LOGS
+            trace_printk("slow exit, inject pending timer\n");
+            #endif
 			kvm_inject_pending_timer_irqs(vcpu);
 			if (blocked) {
 				atomic_inc(&vcpu->tracking.hlt_timer);
@@ -10985,8 +11025,11 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 
 		if (dm_request_for_irq_injection(vcpu) &&
 			kvm_vcpu_ready_for_interrupt_injection(vcpu)) {
+      	#ifdef CUST_DBG_LOGS
+              trace_printk("slow exit, request irq injection\n");
+              #endif
 			if (blocked) {
-				// nevere hit
+				// never hit
 				atomic_inc(&vcpu->tracking.hlt_irq);
 				handled = true;
 			}
@@ -11007,8 +11050,14 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 		if (!handled && blocked) {
 			atomic_inc(&vcpu->tracking.hlt_other);
 		}
+  	    #ifdef CUST_DBG_LOGS
+        trace_printk("slow exit, looping\n");
+        #endif
 	}
 
+	#ifdef CUST_DBG_LOGS
+    trace_printk("slow exit, leaving vcpu_run, r=%d\n", r);
+    #endif
 	return r;
 }
 
