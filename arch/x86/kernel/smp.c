@@ -218,6 +218,45 @@ static void native_stop_other_cpus(int wait)
 	local_irq_restore(flags);
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_reschedule_ipis = 0;
+int sysctl_call_functions = 0;
+int sysctl_call_function_single = 0;
+
+static struct ctl_table smp_debug_table[] = {
+	{
+		.procname	= "reschedule_ipis",
+		.data		= &sysctl_reschedule_ipis,
+		.maxlen		= sizeof(sysctl_reschedule_ipis),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "call_functions",
+		.data		= &sysctl_call_functions,
+		.maxlen		= sizeof(sysctl_call_functions),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "call_function_single",
+		.data		= &sysctl_call_function_single,
+		.maxlen		= sizeof(sysctl_call_function_single),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init smp_debug_sysctl_init(void)
+{
+	pr_info("prepping smp sysctl table");
+	register_sysctl_init("alex", smp_debug_table);
+	return 0;
+}
+late_initcall(smp_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
 /*
  * Reschedule call back. KVM uses this interrupt to force a cpu out of
  * guest mode.
@@ -229,6 +268,10 @@ DEFINE_IDTENTRY_SYSVEC_SIMPLE(sysvec_reschedule_ipi)
 	inc_irq_stat(irq_resched_count);
 	scheduler_ipi();
 	trace_reschedule_exit(RESCHEDULE_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == 24)
+		++sysctl_reschedule_ipis;
+#endif
 }
 
 DEFINE_IDTENTRY_SYSVEC(sysvec_call_function)
@@ -238,6 +281,10 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_call_function)
 	inc_irq_stat(irq_call_count);
 	generic_smp_call_function_interrupt();
 	trace_call_function_exit(CALL_FUNCTION_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == 24)
+		++sysctl_call_functions;
+#endif
 }
 
 DEFINE_IDTENTRY_SYSVEC(sysvec_call_function_single)
@@ -247,6 +294,10 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_call_function_single)
 	inc_irq_stat(irq_call_count);
 	generic_smp_call_function_single_interrupt();
 	trace_call_function_single_exit(CALL_FUNCTION_SINGLE_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == 24)
+		++sysctl_call_function_single;
+#endif
 }
 
 static int __init nonmi_ipi_setup(char *str)

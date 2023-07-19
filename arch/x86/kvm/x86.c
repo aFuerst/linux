@@ -10482,7 +10482,9 @@ EXPORT_SYMBOL_GPL(__kvm_request_immediate_exit);
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	int r;
+	#ifdef CUST_DBG_LOGS
     u64 info[5];
+	#endif
 	bool req_int_win =
 		dm_request_for_irq_injection(vcpu) &&
 		kvm_cpu_accept_dm_intr(vcpu);
@@ -10753,7 +10755,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		WARN_ON_ONCE((kvm_vcpu_apicv_activated(vcpu) != kvm_vcpu_apicv_active(vcpu)) &&
 			     (kvm_get_apic_mode(vcpu) != LAPIC_MODE_DISABLED));
 
-		vcpu_entry_print(vcpu->vcpu_id, &vcpu->tracking);
+		// vcpu_entry_print(vcpu->vcpu_id, &vcpu->tracking);
 		exit_fastpath = static_call(kvm_x86_vcpu_run)(vcpu);
 		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
 			break;
@@ -10769,9 +10771,10 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		/* Note, VM-Exits that go down the "slow" path are accounted below. */
 		++vcpu->stat.exits;
 		// continuing loop means fast entry
-		atomic_inc(&vcpu->tracking.fast_reentry);
+		// atomic_inc(&vcpu->tracking.fast_reentry);
 	}	
-	atomic_inc(&vcpu->tracking.slow_reentry);
+    // trace_printk("vcpu slow exit");
+	// atomic_inc(&vcpu->tracking.slow_reentry);
 
 	/*
 	 * Do this here before restoring debug registers on the host.  And
@@ -10876,11 +10879,11 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
     }
 
 	r = static_call(kvm_x86_handle_exit)(vcpu, exit_fastpath);
+	#ifdef CUST_DBG_LOGS
     memset(&info, 0, sizeof(info));
 	static_call(kvm_x86_get_exit_info)(vcpu, (u32 *)&info[0], &info[1],
 					   &info[2], (u32 *)&info[3],
 					   (u32 *)&info[4]);
-	#ifdef CUST_DBG_LOGS
     trace_printk("slow path vm exit; intr_info: %llu; vcpu->run->exit_reason: %d\n", info[0], vcpu->run->exit_reason);
     #endif
 	return r;
@@ -10969,6 +10972,69 @@ static inline bool kvm_vcpu_running(struct kvm_vcpu *vcpu)
 		!vcpu->arch.apf.halted);
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_slow_exits = 0;
+int sysctl_slow_exit_break = 0;
+int sysctl_slow_exit_loop = 0;
+int sysctl_slow_exit_timer = 0;
+int sysctl_slow_exit_irq_injection = 0;
+int sysctl_slow_xfer_guest_mode = 0;
+
+static struct ctl_table kvm_x86_debug_table[] = {
+	{
+		.procname	= "slow_exits",
+		.data		= &sysctl_slow_exits,
+		.maxlen		= sizeof(sysctl_slow_exits),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "slow_exit_break",
+		.data		= &sysctl_slow_exit_break,
+		.maxlen		= sizeof(sysctl_slow_exit_break),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "slow_exit_loop",
+		.data		= &sysctl_slow_exit_loop,
+		.maxlen		= sizeof(sysctl_slow_exit_loop),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "slow_exit_timer",
+		.data		= &sysctl_slow_exit_timer,
+		.maxlen		= sizeof(sysctl_slow_exit_timer),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "slow_exit_irq_injection",
+		.data		= &sysctl_slow_exit_irq_injection,
+		.maxlen		= sizeof(sysctl_slow_exit_irq_injection),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "slow_exit_xfer_guest_mode",
+		.data		= &sysctl_slow_xfer_guest_mode,
+		.maxlen		= sizeof(sysctl_slow_xfer_guest_mode),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init kvm_x86_debug_sysctl_init(void)
+{
+	pr_info("prepping kvm sysctl table");
+	register_sysctl_init("alex", kvm_x86_debug_table);
+	return 0;
+}
+late_initcall(kvm_x86_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
 /* Called within kvm->srcu read side.  */
 static int vcpu_run(struct kvm_vcpu *vcpu)
 {
@@ -10977,9 +11043,11 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 	vcpu->arch.l1tf_flush_l1d = true;
 
 	for (;;) {
+        #ifdef CUST_DBG_LOGS
 		bool blocked = false;
 		bool handled = false;
-		/*
+        #endif
+        /*
 		 * If another guest vCPU requests a PV TLB flush in the middle
 		 * of instruction emulation, the rest of the emulation could
 		 * use a stale page translation. Assume that any code after
@@ -10987,17 +11055,20 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 		 */
 		vcpu->arch.at_instruction_boundary = false;
 		if (kvm_vcpu_running(vcpu)) {
-	#ifdef CUST_DBG_LOGS
+        	#ifdef CUST_DBG_LOGS
             trace_printk("slow exit, re-enter\n");
             #endif
 			r = vcpu_enter_guest(vcpu);
+			#ifdef CONFIG_SYSCTL
+			++sysctl_slow_exits;
+			#endif
 		} else {
-	#ifdef CUST_DBG_LOGS
+        	#ifdef CUST_DBG_LOGS
             trace_printk("slow exit, block\n");
+			// atomic_inc(&vcpu->tracking.hlt);
+			blocked = true;
             #endif
 			r = vcpu_block(vcpu);
-			atomic_inc(&vcpu->tracking.hlt);
-			blocked = true;
 		}
 
 		if (r <= 0) {
@@ -11006,33 +11077,39 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 
 		kvm_clear_request(KVM_REQ_UNBLOCK, vcpu);
 		if (kvm_xen_has_pending_events(vcpu)) {
-	#ifdef CUST_DBG_LOGS
+	        #ifdef CUST_DBG_LOGS
             trace_printk("slow exit, inject xen event\n");
             #endif
 			kvm_xen_inject_pending_events(vcpu);
         }
 
 		if (kvm_cpu_has_pending_timer(vcpu)) {
-	#ifdef CUST_DBG_LOGS
-            trace_printk("slow exit, inject pending timer\n");
-            #endif
 			kvm_inject_pending_timer_irqs(vcpu);
+			#ifdef CONFIG_SYSCTL
+			++sysctl_slow_exit_timer;
+			#endif
+        	#ifdef CUST_DBG_LOGS
+            trace_printk("slow exit, inject pending timer\n");
 			if (blocked) {
 				atomic_inc(&vcpu->tracking.hlt_timer);
 				handled = true;
 			}
+            #endif
 		}
 
 		if (dm_request_for_irq_injection(vcpu) &&
 			kvm_vcpu_ready_for_interrupt_injection(vcpu)) {
-      	#ifdef CUST_DBG_LOGS
+          	#ifdef CUST_DBG_LOGS
               trace_printk("slow exit, request irq injection\n");
-              #endif
 			if (blocked) {
 				// never hit
 				atomic_inc(&vcpu->tracking.hlt_irq);
 				handled = true;
 			}
+            #endif
+			#ifdef CONFIG_SYSCTL
+			++sysctl_slow_exit_irq_injection;
+			#endif
 
 			r = 0;
 			vcpu->run->exit_reason = KVM_EXIT_IRQ_WINDOW_OPEN;
@@ -11043,18 +11120,27 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 		if (__xfer_to_guest_mode_work_pending()) {
 			kvm_vcpu_srcu_read_unlock(vcpu);
 			r = xfer_to_guest_mode_handle_work(vcpu);
+			#ifdef CONFIG_SYSCTL
+			++sysctl_slow_xfer_guest_mode;
+			#endif
 			kvm_vcpu_srcu_read_lock(vcpu);
 			if (r)
 				return r;
 		}
+  	    #ifdef CUST_DBG_LOGS
 		if (!handled && blocked) {
 			atomic_inc(&vcpu->tracking.hlt_other);
 		}
-  	    #ifdef CUST_DBG_LOGS
         trace_printk("slow exit, looping\n");
         #endif
+		#ifdef CONFIG_SYSCTL
+		++sysctl_slow_exit_loop;
+		#endif
 	}
-
+	#ifdef CONFIG_SYSCTL
+	++sysctl_slow_exit_break;
+	#endif
+	
 	#ifdef CUST_DBG_LOGS
     trace_printk("slow exit, leaving vcpu_run, r=%d\n", r);
     #endif
