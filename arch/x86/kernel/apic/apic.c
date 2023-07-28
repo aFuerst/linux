@@ -1099,6 +1099,29 @@ static void local_apic_timer_interrupt(void)
 	evt->event_handler(evt);
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_local_apic = 0;
+
+static struct ctl_table apic_debug_table[] = {
+	{
+		.procname	= "local_apic",
+		.data		= &sysctl_local_apic,
+		.maxlen		= sizeof(sysctl_local_apic),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init apic_debug_sysctl_init(void)
+{
+	pr_info("prepping apic table");
+	register_sysctl_init("alex", apic_debug_table);
+	return 0;
+}
+late_initcall(apic_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
 /*
  * Local APIC timer interrupt. This is the most natural way for doing
  * local interrupts, but local timer interrupts can be emulated by

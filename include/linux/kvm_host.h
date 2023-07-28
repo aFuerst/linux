@@ -332,18 +332,24 @@ struct tracking_data {
 	atomic_t hlt_irq;
 	// A HLT was resolved by another means than above
 	atomic_t hlt_other;
+
+	u64 external_interrupt;
+	u64 apic_write;
+	u64 msr_write;
+	u64 msr_read;
+	u64 other;
 };
-static __always_inline void vcpu_entry_print(int vcpu_id, struct tracking_data *data)
-{
-	// pr_info("%s%d: vcpu running %d", __func__, __LINE__, vcpu->vcpu_id);
-	pr_err_once("vcpu entry %d fr: %d sr: %d h: %d ht:%d hi:%d ho:%d", vcpu_id, 
-			atomic_read(&data->fast_reentry),
-			atomic_read(&data->slow_reentry),
-			atomic_read(&data->hlt),
-			atomic_read(&data->hlt_timer),
-			atomic_read(&data->hlt_irq),
-			atomic_read(&data->hlt_other));
-}
+// static __always_inline void vcpu_entry_print(int vcpu_id, struct tracking_data *data)
+// {
+// 	// pr_info("%s%d: vcpu running %d", __func__, __LINE__, vcpu->vcpu_id);
+// 	pr_err_once("vcpu entry %d fr: %d sr: %d h: %d ht:%d hi:%d ho:%d", vcpu_id, 
+// 			atomic_read(&data->fast_reentry),
+// 			atomic_read(&data->slow_reentry),
+// 			atomic_read(&data->hlt),
+// 			atomic_read(&data->hlt_timer),
+// 			atomic_read(&data->hlt_irq),
+// 			atomic_read(&data->hlt_other));
+// }
 
 struct kvm_vcpu {
 	struct tracking_data tracking;

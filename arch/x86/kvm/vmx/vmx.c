@@ -6425,6 +6425,30 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 		       vmcs_read16(VIRTUAL_PROCESSOR_ID));
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_vmx_exit_handlers = 0;
+
+static struct ctl_table vmx_handle_exit_debug_table[] = {
+	{
+		.procname	= "vmx_exit_handlers",
+		.data		= &sysctl_vmx_exit_handlers,
+		.maxlen		= sizeof(sysctl_vmx_exit_handlers),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init vmx_handle_exit_debug_sysctl_init(void)
+{
+	pr_info("prepping kvm_handle_exit_debug_table table");
+	register_sysctl_init("alex", vmx_handle_exit_debug_table);
+	return 0;
+}
+late_initcall(vmx_handle_exit_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
+
 /*
  * The guest has exited.  See if we can fix it or if we need userspace
  * assistance.
@@ -6599,6 +6623,9 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		goto unexpected_vmexit;
 
 	pr_err_once("%s%d: kvm_vmx_exit_handlers[%d]", __func__, __LINE__, exit_handler_index);
+	#ifdef CONFIG_SYSCTL
+	++sysctl_vmx_exit_handlers;
+	#endif
 	r = kvm_vmx_exit_handlers[exit_handler_index](vcpu);
 	#ifdef CUST_DBG_LOGS
 	if (++cnt % 100 == 0) {
@@ -6942,9 +6969,76 @@ static void handle_nm_fault_irqoff(struct kvm_vcpu *vcpu)
 		rdmsrl(MSR_IA32_XFD_ERR, vcpu->arch.guest_fpu.xfd_err);
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_handled_interrupts = 0;
+int sysctl_handled_reschedule = 0;
+int sysctl_handled_function_vector = 0;
+int sysctl_handled_function_single_vector = 0;
+int sysctl_handled_local_timer = 0;
+int sysctl_other_interrupt = 0;
+
+static struct ctl_table kvm_debug_table[] = {
+	{
+		.procname	= "handled_interrupts",
+		.data		= &sysctl_handled_interrupts,
+		.maxlen		= sizeof(sysctl_handled_interrupts),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "handled_reschedule",
+		.data		= &sysctl_handled_reschedule,
+		.maxlen		= sizeof(sysctl_handled_reschedule),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "handled_function_vector",
+		.data		= &sysctl_handled_function_vector,
+		.maxlen		= sizeof(sysctl_handled_function_vector),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "handled_function_single_vector",
+		.data		= &sysctl_handled_function_single_vector,
+		.maxlen		= sizeof(sysctl_handled_function_single_vector),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "handled_local_timer",
+		.data		= &sysctl_handled_local_timer,
+		.maxlen		= sizeof(sysctl_handled_local_timer),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "handled_other_interrupt",
+		.data		= &sysctl_other_interrupt,
+		.maxlen		= sizeof(sysctl_other_interrupt),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init kvm_debug_sysctl_init(void)
+{
+	pr_info("prepping kvm sysctl table");
+	register_sysctl_init("alex", kvm_debug_table);
+	return 0;
+}
+late_initcall(kvm_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
+
 static void handle_exception_irqoff(struct vcpu_vmx *vmx)
 {
 	u32 intr_info = vmx_get_intr_info(&vmx->vcpu);
+#ifdef CUST_DBG_LOGS
+	trace_printk("handling exception irqoff in KVM");
+#endif
 
 	/* if exit due to PF check for async PF */
 	if (is_page_fault(intr_info))
@@ -6960,8 +7054,33 @@ static void handle_exception_irqoff(struct vcpu_vmx *vmx)
 static void handle_external_interrupt_irqoff(struct kvm_vcpu *vcpu)
 {
 	u32 intr_info = vmx_get_intr_info(vcpu);
+	// static int cnt = 0;
 	unsigned int vector = intr_info & INTR_INFO_VECTOR_MASK;
 	gate_desc *desc = (gate_desc *)host_idt_base + vector;
+#ifdef CUST_DBG_LOGS
+	trace_printk("handling external interrupt irqoff in KVM for intr_info: %X; vec: %X; at: %lX\n", intr_info, vector, gate_offset(desc));
+#endif
+
+	#ifdef CONFIG_SYSCTL
+	++sysctl_handled_interrupts;
+	switch (vector) {
+	case LOCAL_TIMER_VECTOR:
+		++sysctl_handled_local_timer;
+		break;
+	case CALL_FUNCTION_SINGLE_VECTOR:
+		++sysctl_handled_function_single_vector;
+		break;
+	case CALL_FUNCTION_VECTOR:
+		++sysctl_handled_function_vector;
+		break;
+	case RESCHEDULE_VECTOR:
+		++sysctl_handled_reschedule;
+		break;
+	default:
+		++sysctl_other_interrupt;
+		break;
+	}
+	#endif
 
 	if (KVM_BUG(!is_external_intr(intr_info), vcpu->kvm,
 	    "unexpected VM-Exit interrupt info: 0x%x", intr_info))
@@ -6974,12 +7093,106 @@ static void handle_external_interrupt_irqoff(struct kvm_vcpu *vcpu)
 	vcpu->arch.at_instruction_boundary = true;
 }
 
+#ifdef CONFIG_SYSCTL
+int sysctl_exit_other = 0;
+int sysctl_exit_nmi = 0;
+int sysctl_exit_interrupt = 0;
+int sysctl_exit_apic_write = 0;
+int sysctl_exit_msr_read = 0;
+int sysctl_exit_msr_write = 0;
+int sysctl_exit_interrupt_window = 0;
+
+static struct ctl_table vmx_handle_debug_table[] = {
+	{
+		.procname	= "exit_other",
+		.data		= &sysctl_exit_other,
+		.maxlen		= sizeof(sysctl_exit_other),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_nmi",
+		.data		= &sysctl_exit_nmi,
+		.maxlen		= sizeof(sysctl_exit_nmi),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_interrupt",
+		.data		= &sysctl_exit_interrupt,
+		.maxlen		= sizeof(sysctl_exit_interrupt),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_apic_write",
+		.data		= &sysctl_exit_apic_write,
+		.maxlen		= sizeof(sysctl_exit_apic_write),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_msr_read",
+		.data		= &sysctl_exit_msr_read,
+		.maxlen		= sizeof(sysctl_exit_msr_read),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_msr_write",
+		.data		= &sysctl_exit_msr_write,
+		.maxlen		= sizeof(sysctl_exit_msr_write),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "exit_msr_interrupt_window",
+		.data		= &sysctl_exit_interrupt_window,
+		.maxlen		= sizeof(sysctl_exit_interrupt_window),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+static int __init vmx_handle_debug_sysctl_init(void)
+{
+	pr_info("prepping kvm sysctl table");
+	register_sysctl_init("alex", vmx_handle_debug_table);
+	return 0;
+}
+late_initcall(vmx_handle_debug_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
 static void vmx_handle_exit_irqoff(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 
 	if (vmx->emulation_required)
 		return;
+
+	switch (vmx->exit_reason.basic) {
+	case EXIT_REASON_EXTERNAL_INTERRUPT:
+		++sysctl_exit_interrupt;
+		break;
+	case EXIT_REASON_EXCEPTION_NMI:
+		++sysctl_exit_nmi;
+		break;
+	case EXIT_REASON_MSR_READ:
+		++sysctl_exit_msr_read;
+		break;
+	case EXIT_REASON_MSR_WRITE:
+		++sysctl_exit_msr_write;
+		break;
+	case EXIT_REASON_APIC_WRITE:
+		++sysctl_exit_apic_write;
+		break;
+	case EXIT_REASON_INTERRUPT_WINDOW:
+		++sysctl_exit_interrupt_window;
+		break;
+	default:
+		++sysctl_exit_other;
+		break;
+	}
 
 	if (vmx->exit_reason.basic == EXIT_REASON_EXTERNAL_INTERRUPT)
 		handle_external_interrupt_irqoff(vcpu);
@@ -7264,7 +7477,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	u64 info[5];
-	// static int call_cnt = 0;
+	static int write_cnt = 0;
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long cr3, cr4;
 
@@ -7412,6 +7625,31 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 	trace_kvm_exit(vcpu, KVM_ISA_VMX);
 	
+	switch (vmx->exit_reason.basic) {
+	case EXIT_REASON_EXTERNAL_INTERRUPT:
+		vcpu->tracking.external_interrupt++;
+		break;
+	case EXIT_REASON_MSR_READ:
+		vcpu->tracking.msr_read++;
+		break;
+	case EXIT_REASON_MSR_WRITE:
+		vcpu->tracking.msr_write++;
+		break;
+	case EXIT_REASON_APIC_WRITE:
+		vcpu->tracking.apic_write++;
+		break;
+	default:
+		vcpu->tracking.other++;
+		break;
+	}
+	if (++write_cnt % 20000 == 0) {
+		pr_err_once("vcpu exit reasons ext_intr: %llu, msr_read: %llu, msr_write: %llu, other: %llu\n", 
+			vcpu->tracking.external_interrupt,
+			vcpu->tracking.msr_read,
+			vcpu->tracking.msr_write,
+			vcpu->tracking.other);
+	}
+
 	memset(&info, 0, sizeof(info));
 	static_call(kvm_x86_get_exit_info)(vcpu, (u32 *)&info[0], &info[1],
 					   &info[2], (u32 *)&info[3],
