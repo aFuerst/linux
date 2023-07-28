@@ -331,6 +331,10 @@ int clockevents_program_event(struct clock_event_device *dev, ktime_t expires,
 	delta = max(delta, (int64_t) dev->min_delta_ns);
 
 	clc = ((unsigned long long) delta * dev->mult) >> dev->shift;
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		trace_printk("seting clock event using %pS with delta %lld\n", dev->set_next_event, delta);
+	}
+
 	rc = dev->set_next_event((unsigned long) clc, dev);
 
 	return (rc && force) ? clockevents_program_min_delta(dev) : rc;

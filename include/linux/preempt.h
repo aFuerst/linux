@@ -303,6 +303,18 @@ do { \
 	if (tif_need_resched()) \
 		set_preempt_need_resched(); \
 } while (0)
+/*
+	} else { \
+	} \
+		#ifdef CONFIG_SYSCTL \
+		if (raw_smp_processor_id() == sysctl_monitored_cpu_core) \
+			++sysctl_set_preempt_need_resched; \
+		#endif \
+		#ifdef CONFIG_SYSCTL \
+		if (raw_smp_processor_id() == sysctl_monitored_cpu_core) \
+			++sysctl_skip_set_preempt_need_resched; \
+		#endif \
+ */
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 

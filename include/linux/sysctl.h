@@ -87,6 +87,7 @@ int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int, void *,
 int proc_do_large_bitmap(struct ctl_table *, int, void *, size_t *, loff_t *);
 int proc_do_static_key(struct ctl_table *table, int write, void *buffer,
 		size_t *lenp, loff_t *ppos);
+extern int sysctl_monitored_cpu_core;
 
 /*
  * Register a set of sysctl names by calling register_sysctl_table

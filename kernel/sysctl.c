@@ -726,6 +726,27 @@ int proc_dobool(struct ctl_table *table, int write, void *buffer,
 	return 0;
 }
 
+int sysctl_monitored_cpu_core __read_mostly = 24;
+
+static struct ctl_table core_monitoring_callbacks_table[] = {
+	{
+		.procname	= "monitored_cpu_core",
+		.data		= &sysctl_monitored_cpu_core,
+		.maxlen		= sizeof(sysctl_monitored_cpu_core),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init cpu_core_monitoring_sysctl_init(void)
+{
+	pr_info("core monitoring sysctl callback table");
+	register_sysctl_init("alex", core_monitoring_callbacks_table);
+	return 0;
+}
+late_initcall(cpu_core_monitoring_sysctl_init);
+
 /**
  * proc_dointvec - read a vector of integers
  * @table: the sysctl table

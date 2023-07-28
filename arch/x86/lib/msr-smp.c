@@ -151,7 +151,7 @@ struct msr_info_completion {
 
 /* These "safe" variants are slower and should be used when the target MSR
    may not actually exist. */
-static void __rdmsr_safe_on_cpu(void *info)
+void __rdmsr_safe_on_cpu(void *info)
 {
 	struct msr_info_completion *rv = info;
 
@@ -171,6 +171,10 @@ int rdmsr_safe_on_cpu(unsigned int cpu, u32 msr_no, u32 *l, u32 *h)
 	struct msr_info_completion rv;
 	call_single_data_t csd;
 	int err;
+
+	// if (cpu == sysctl_monitored_cpu_core) {
+	// 	dump_stack();
+	// }
 
 	INIT_CSD(&csd, __rdmsr_safe_on_cpu, &rv);
 

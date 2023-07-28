@@ -5,12 +5,6 @@
 #
 mainmenu "Linux/$(ARCH) $(KERNELVERSION) Kernel Configuration"
 
-config CONFIG_CUST_DBG_LOGS
-    bool "Select to enable some cust debug logs for orphan vm"
-    default n
-    help
-      Yeah this shouldnt go anywhere else
-
 source "scripts/Kconfig.include"
 
 source "init/Kconfig"

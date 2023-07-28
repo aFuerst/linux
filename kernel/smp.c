@@ -385,6 +385,11 @@ static int generic_exec_single(int cpu, struct __call_single_data *csd)
 		csd_unlock(csd);
 		return -ENXIO;
 	}
+	#ifdef CONFIG_64BIT
+	csd->node.src = smp_processor_id();
+	csd->node.dst = cpu;
+	#endif
+
 
 	__smp_call_single_queue(cpu, &csd->node.llist);
 
@@ -401,6 +406,116 @@ void generic_smp_call_function_single_interrupt(void)
 {
 	__flush_smp_call_function_queue(true);
 }
+
+#ifdef CONFIG_SYSCTL
+int sysctl_sync_callbacks = 0;
+int sysctl_non_sync_callbacks = 0;
+int sysctl_ttwu_callbacks = 0;
+int sysctl_irq_work_callbacks = 0;
+int sysctl_unknown_callbacks = 0;
+#define NUM_FUNC_SPCS 10
+int sysctl_called_funcs[NUM_FUNC_SPCS] = {0};
+#define NUM_CORES 48
+int sysctl_from_cpuid[NUM_CORES] = {0};
+
+static struct ctl_table smp_callbacks_table[] = {
+	{
+		.procname	= "sync_callbacks",
+		.data		= &sysctl_sync_callbacks,
+		.maxlen		= sizeof(sysctl_sync_callbacks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "non_sync_callbacks",
+		.data		= &sysctl_non_sync_callbacks,
+		.maxlen		= sizeof(sysctl_non_sync_callbacks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "irq_work_callbacks",
+		.data		= &sysctl_irq_work_callbacks,
+		.maxlen		= sizeof(sysctl_irq_work_callbacks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "ttwu_callbacks",
+		.data		= &sysctl_ttwu_callbacks,
+		.maxlen		= sizeof(sysctl_ttwu_callbacks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "unknown_callbacks",
+		.data		= &sysctl_unknown_callbacks,
+		.maxlen		= sizeof(sysctl_unknown_callbacks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "called_funcs",
+		.data		= &sysctl_called_funcs,
+		.maxlen		= NUM_FUNC_SPCS*sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "from_cpuid",
+		.data		= &sysctl_from_cpuid,
+		.maxlen		= NUM_CORES*sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init smp_callbacks_sysctl_init(void)
+{
+	pr_info("prepping smp sysctl callback table");
+	register_sysctl_init("alex", smp_callbacks_table);
+	return 0;
+}
+late_initcall(smp_callbacks_sysctl_init);
+
+void nohz_full_kick_func(struct irq_work *work);
+void __rdmsr_safe_on_cpu(void *info);
+void cpuid_smp_cpuid(void *cmd_block);
+void ack_kick(void *_completed);
+
+void __csd_func_bookkeep(call_single_data_t *csd) {
+	if (csd->func == __rdmsr_safe_on_cpu) {
+		++sysctl_called_funcs[0];
+	} else if (csd->func == cpuid_smp_cpuid) {
+		++sysctl_called_funcs[1];
+	// } else if (csd->func == ack_kick) {
+	//  	++sysctl_called_funcs[2];
+	} else if ((void (*)(void *))csd->func == (void (*)(void *))nohz_full_kick_func) {
+		++sysctl_called_funcs[3];
+	} else {
+		++sysctl_called_funcs[9];
+	}
+}
+
+
+void __irq_func_bookkeep(call_single_data_t *csd) {
+	if ((void (*)(void *))((struct irq_work *)csd)->func == (void (*)(void *))nohz_full_kick_func) {
+		++sysctl_called_funcs[4];
+	} else {
+		++sysctl_called_funcs[8];
+	}
+}
+
+void __ttwu_func_bookkeep(call_single_data_t *csd) {
+	// if (((struct irq_work *)csd)->func == nohz_full_kick_func) {
+		
+	// } else {
+		++sysctl_called_funcs[7];
+	// }
+}
+#endif /* CONFIG_SYSCTL */
+
 
 /**
  * __flush_smp_call_function_queue - Flush pending smp-call-function callbacks
@@ -428,6 +543,45 @@ static void __flush_smp_call_function_queue(bool warn_cpu_offline)
 	head = this_cpu_ptr(&call_single_queue);
 	entry = llist_del_all(head);
 	entry = llist_reverse_order(entry);
+
+	if (raw_smp_processor_id() == sysctl_monitored_cpu_core) {
+		llist_for_each_entry(csd, entry, node.llist) {
+			u16 src, dst;
+			// call_single_data_t *csd;
+			src = csd->node.src;
+			dst = csd->node.dst;
+			if (src < NUM_CORES) {
+				++sysctl_from_cpuid[src];
+			}
+
+			switch (CSD_TYPE(csd)) {
+			case CSD_TYPE_ASYNC:
+				++sysctl_non_sync_callbacks;
+				__csd_func_bookkeep(csd);
+				trace_printk("executing non-sync callback from: '%d' to: '%d' %pS\n", src, dst, csd->func);
+				break;
+			case CSD_TYPE_SYNC:
+				++sysctl_sync_callbacks;
+				__csd_func_bookkeep(csd);
+				trace_printk("executing sync callback from: '%d' to: '%d' %pS\n", src, dst, csd->func);
+				break;
+			case CSD_TYPE_IRQ_WORK:
+				++sysctl_irq_work_callbacks;
+				__irq_func_bookkeep(csd);
+				trace_printk("executing irq work callback from: '%d' to: '%d' %pS\n", src, dst, ((struct irq_work *)csd)->func);
+				break;
+
+			case CSD_TYPE_TTWU:
+				++sysctl_ttwu_callbacks;
+				// csd = container_of(&csd->node, call_single_data_t, &(csd->node.llist));
+				trace_printk("executing ttwu callback from: '%d' to: '%d' %pS\n", src, dst, csd->func);
+				break;
+			default:
+				++sysctl_unknown_callbacks;
+				break;
+			}
+		}
+	}
 
 	/* There shouldn't be any pending callbacks on an offline CPU. */
 	if (unlikely(warn_cpu_offline && !cpu_online(smp_processor_id()) &&
@@ -477,7 +631,7 @@ static void __flush_smp_call_function_queue(bool warn_cpu_offline)
 			}
 
 			csd_lock_record(csd);
-			func(info);
+			func(info);	
 			csd_unlock(csd);
 			csd_lock_record(NULL);
 		} else {
@@ -506,12 +660,28 @@ static void __flush_smp_call_function_queue(bool warn_cpu_offline)
 				smp_call_func_t func = csd->func;
 				void *info = csd->info;
 
+
 				csd_lock_record(csd);
 				csd_unlock(csd);
 				func(info);
+				/*
+				if (raw_smp_processor_id() == sysctl_monitored_cpu_core) {
+					u16 src, dst;
+					src = csd->node.src;
+					dst = csd->node.dst;
+				}
+				*/
 				csd_lock_record(NULL);
 			} else if (type == CSD_TYPE_IRQ_WORK) {
 				irq_work_single(csd);
+				/*
+				if (raw_smp_processor_id() == sysctl_monitored_cpu_core) {
+					u16 src, dst;
+					src = csd->node.src;
+					dst = csd->node.dst;
+					trace_printk("executing non-sync callback from: '%d'; to: '%d' %pS\n", src, dst, ((struct irq_work *)csd)->func);
+				}
+				*/
 			}
 
 		} else {

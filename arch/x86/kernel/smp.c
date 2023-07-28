@@ -229,6 +229,10 @@ DEFINE_IDTENTRY_SYSVEC_SIMPLE(sysvec_reschedule_ipi)
 	inc_irq_stat(irq_resched_count);
 	scheduler_ipi();
 	trace_reschedule_exit(RESCHEDULE_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == sysctl_monitored_cpu_core)
+		++sysctl_reschedule_ipis;
+#endif
 }
 
 DEFINE_IDTENTRY_SYSVEC(sysvec_call_function)
@@ -238,6 +242,10 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_call_function)
 	inc_irq_stat(irq_call_count);
 	generic_smp_call_function_interrupt();
 	trace_call_function_exit(CALL_FUNCTION_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == sysctl_monitored_cpu_core)
+		++sysctl_call_functions;
+#endif
 }
 
 DEFINE_IDTENTRY_SYSVEC(sysvec_call_function_single)
@@ -247,6 +255,10 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_call_function_single)
 	inc_irq_stat(irq_call_count);
 	generic_smp_call_function_single_interrupt();
 	trace_call_function_single_exit(CALL_FUNCTION_SINGLE_VECTOR);
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == sysctl_monitored_cpu_core)
+		++sysctl_call_function_single;
+#endif
 }
 
 static int __init nonmi_ipi_setup(char *str)

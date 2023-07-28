@@ -170,6 +170,10 @@ bool irq_work_queue_on(struct irq_work *work, int cpu)
 				goto out;
 		}
 
+		#ifdef CONFIG_64BIT
+		work->node.src = smp_processor_id();
+		work->node.dst = cpu;
+		#endif
 		__smp_call_single_queue(cpu, &work->node.llist);
 	} else {
 		__irq_work_queue_local(work);

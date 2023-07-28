@@ -138,6 +138,11 @@ static bool tick_set_oneshot_wakeup_device(struct clock_event_device *newdev,
 	if (!try_module_get(newdev->owner))
 		return false;
 
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		dump_stack();
+		printk("switching timer handler tick_set_oneshot_wakeup_device from %pS to oneshot %pS", newdev->event_handler, tick_oneshot_wakeup_handler);
+		trace_printk("switching timer handler tick_set_oneshot_wakeup_device from %pS to oneshot %pS", newdev->event_handler, tick_oneshot_wakeup_handler);
+	}
 	newdev->event_handler = tick_oneshot_wakeup_handler;
 set_device:
 	clockevents_exchange_device(curdev, newdev);
@@ -259,6 +264,13 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 	 * the cpu local device.
 	 */
 	if (!tick_device_is_functional(dev)) {
+
+		if (smp_processor_id() == sysctl_monitored_cpu_core) {
+			dump_stack();
+			printk("tick_device_uses_broadcast switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic);
+			trace_printk("tick_device_uses_broadcast switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic);
+		}
+
 		dev->event_handler = tick_handle_periodic;
 		tick_device_setup_broadcast_func(dev);
 		cpumask_set_cpu(cpu, tick_broadcast_mask);
@@ -514,10 +526,22 @@ EXPORT_SYMBOL_GPL(tick_broadcast_control);
  */
 void tick_set_periodic_handler(struct clock_event_device *dev, int broadcast)
 {
-	if (!broadcast)
+	if (!broadcast) {
+		if (smp_processor_id() == sysctl_monitored_cpu_core) {
+			dump_stack();
+			printk("tick_set_periodic_handler switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic);
+			trace_printk("tick_set_periodic_handler switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic);
+		}
+
 		dev->event_handler = tick_handle_periodic;
-	else
+	} else {
+		if (smp_processor_id() == sysctl_monitored_cpu_core) {
+			dump_stack();
+			printk("tick_set_periodic_handler broadcast switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic_broadcast);
+			trace_printk("tick_set_periodic_handler broadcast switching timer handler from %pS to %pS", dev->event_handler, tick_handle_periodic_broadcast);
+		}
 		dev->event_handler = tick_handle_periodic_broadcast;
+	}
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1059,7 +1083,11 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc,
 		return;
 	}
 
-
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		dump_stack();
+		printk("tick_broadcast_setup_oneshot switching timer handler from %pS to %pS", bc->event_handler, tick_handle_oneshot_broadcast);
+		trace_printk("tick_broadcast_setup_oneshot switching timer handler from %pS to %pS", bc->event_handler, tick_handle_oneshot_broadcast);
+	}
 	bc->event_handler = tick_handle_oneshot_broadcast;
 	bc->next_event = KTIME_MAX;
 

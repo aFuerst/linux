@@ -1092,6 +1092,10 @@ static void local_apic_timer_interrupt(void)
 	 */
 	inc_irq_stat(apic_timer_irqs);
 
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		trace_printk("%px %pS\n", evt->event_handler, evt->event_handler);
+	}
+
 	evt->event_handler(evt);
 }
 
@@ -1111,7 +1115,10 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_apic_timer_interrupt)
 	trace_local_timer_entry(LOCAL_TIMER_VECTOR);
 	local_apic_timer_interrupt();
 	trace_local_timer_exit(LOCAL_TIMER_VECTOR);
-
+#ifdef CONFIG_SYSCTL
+	if (raw_smp_processor_id() == sysctl_monitored_cpu_core)
+		++sysctl_local_apic;
+#endif
 	set_irq_regs(old_regs);
 }
 

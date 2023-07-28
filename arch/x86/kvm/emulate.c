@@ -5293,7 +5293,7 @@ int x86_emulate_insn(struct x86_emulate_ctxt *ctxt)
 	ctxt->dst.orig_val64 = ctxt->dst.val64;
 
 special_insn:
-	pr_info("%s%d: special_insn 2", __func__, __LINE__);
+	pr_err_once("%s%d: special_insn 2", __func__, __LINE__);
 
 	if (unlikely(is_guest_mode) && (ctxt->d & Intercept)) {
 		pr_err_once("%s%d: emulate emulator_check_intercept 4", __func__, __LINE__);
@@ -5329,7 +5329,7 @@ special_insn:
 		goto threebyte_insn;
 	}
 
-	pr_info("%s%d: special_insn 2 %#x", __func__, __LINE__, ctxt->b);
+	pr_err_once("%s%d: special_insn 2 %#x", __func__, __LINE__, ctxt->b);
 	switch (ctxt->b) {
 	case 0x70 ... 0x7f: /* jcc (short) */
 		if (test_cc(ctxt->b, ctxt->eflags)){
@@ -5408,7 +5408,7 @@ special_insn:
 		goto done;
 
 writeback:
-	pr_info("%s%d: writeback 1", __func__, __LINE__);
+	pr_err_once("%s%d: writeback 1", __func__, __LINE__);
 	if (ctxt->d & SrcWrite) {
 		BUG_ON(ctxt->src.type == OP_MEM || ctxt->src.type == OP_MEM_STR);
 		rc = writeback(ctxt, &ctxt->src);
@@ -5468,7 +5468,7 @@ writeback:
 		ctxt->eip = (u32)ctxt->_eip;
 
 done:
-	pr_info("%s%d: done 1", __func__, __LINE__);
+	pr_err_once("%s%d: done 1", __func__, __LINE__);
 	if (rc == X86EMUL_PROPAGATE_FAULT) {
 		if (KVM_EMULATOR_BUG_ON(ctxt->exception.vector > 0x1f, ctxt))
 			return EMULATION_FAILED;
@@ -5483,7 +5483,7 @@ done:
 	return (rc == X86EMUL_UNHANDLEABLE) ? EMULATION_FAILED : EMULATION_OK;
 
 twobyte_insn:
-	pr_info("%s%d: twobyte_insn 2 %#x", __func__, __LINE__, ctxt->b);
+	pr_err_once("%s%d: twobyte_insn 2 %#x", __func__, __LINE__, ctxt->b);
 	switch (ctxt->b) {
 	case 0x09:		/* wbinvd */
 		(ctxt->ops->wbinvd)(ctxt);

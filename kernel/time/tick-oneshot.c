@@ -91,6 +91,12 @@ int tick_switch_to_oneshot(void (*handler)(struct clock_event_device *))
 		return -EINVAL;
 	}
 
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		dump_stack();
+		printk("switching timer handler from %pS to oneshot %pS", dev->event_handler, handler);
+		trace_printk("switching timer handler from %pS to oneshot %pS", dev->event_handler, handler);
+	}
+
 	td->mode = TICKDEV_MODE_ONESHOT;
 	dev->event_handler = handler;
 	clockevents_switch_state(dev, CLOCK_EVT_STATE_ONESHOT);
@@ -123,6 +129,11 @@ int tick_oneshot_mode_active(void)
  */
 int tick_init_highres(void)
 {
+	// if (smp_processor_id() == sysctl_monitored_cpu_core) {
+	// 	dump_stack();
+	// 	printk("switching to high res timer");
+	// 	trace_printk("switching to high res timer");
+	// }
 	return tick_switch_to_oneshot(hrtimer_interrupt);
 }
 #endif

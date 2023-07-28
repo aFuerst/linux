@@ -1050,7 +1050,7 @@ void resched_curr(struct rq *rq)
 		return;
 
 	cpu = cpu_of(rq);
-	// if (cpu == 24) {
+	// if (cpu == sysctl_monitored_cpu_core) {
 	// 	trace_printk("resched_curr 24");
 	// }
 
@@ -3818,6 +3818,30 @@ static int ttwu_runnable(struct task_struct *p, int wake_flags)
 	return ret;
 }
 
+/*
+#ifdef CONFIG_SYSCTL
+int sysctl_sched_ttwu_pending = 0;
+
+static struct ctl_table smp_ttwu_table[] = {
+	{
+		.procname	= "sched_ttwu_pending",
+		.data		= &sysctl_sched_ttwu_pending,
+		.maxlen		= sizeof(sysctl_sched_ttwu_pending),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init smp_ttwu_sysctl_init(void)
+{
+	pr_info("prepping sysctl ttwu table");
+	register_sysctl_init("alex", smp_ttwu_table);
+	return 0;
+}
+late_initcall(smp_ttwu_sysctl_init);
+#endif */ /* CONFIG_SYSCTL */
+
 #ifdef CONFIG_SMP
 void sched_ttwu_pending(void *arg)
 {
@@ -3838,7 +3862,15 @@ void sched_ttwu_pending(void *arg)
 
 		if (WARN_ON_ONCE(task_cpu(p) != cpu_of(rq)))
 			set_task_cpu(p, cpu_of(rq));
-
+			/*
+			if (raw_smp_processor_id() == sysctl_monitored_cpu_core) {
+				u16 src, dst;
+				src = csd->node.src;
+				dst = csd->node.dst;
+				trace_printk("executing non-sync callback from: '%d'; to: '%d' %pS\n", src, dst, ((struct irq_work *)csd)->func);
+				// ++sysctl_sched_ttwu_pending;
+			}
+			*/
 		ttwu_do_activate(rq, p, p->sched_remote_wakeup ? WF_MIGRATED : 0, &rf);
 	}
 
@@ -3864,7 +3896,7 @@ void sched_ttwu_pending(void *arg)
  */
 bool call_function_single_prep_ipi(int cpu)
 {
-	// if (cpu == 24) {
+	// if (cpu == sysctl_monitored_cpu_core) {
 	// 	trace_printk("set & sending reschedule IPI");
 	// }
 	if (set_nr_if_polling(cpu_rq(cpu)->idle)) {
@@ -3888,6 +3920,10 @@ static void __ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags
 	p->sched_remote_wakeup = !!(wake_flags & WF_MIGRATED);
 
 	WRITE_ONCE(rq->ttwu_pending, 1);
+	#ifdef CONFIG_64BIT
+	p->wake_entry.src = smp_processor_id();
+	p->wake_entry.dst = cpu;
+	#endif
 	__smp_call_single_queue(cpu, &p->wake_entry.llist);
 }
 
@@ -5602,6 +5638,31 @@ __setup("resched_latency_warn_ms=", setup_resched_latency_warn_ms);
 static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
 #endif /* CONFIG_SCHED_DEBUG */
 
+
+
+#ifdef CONFIG_SYSCTL
+int sysctl_scheduler_ticks = 0;
+
+static struct ctl_table sched_table[] = {
+	{
+		.procname	= "scheduler_ticks",
+		.data		= &sysctl_scheduler_ticks,
+		.maxlen		= sizeof(sysctl_scheduler_ticks),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init sched_sysctl_init(void)
+{
+	pr_info("prepping sched table");
+	register_sysctl_init("alex", sched_table);
+	return 0;
+}
+late_initcall(sched_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
 /*
  * This function gets called by the timer code, with HZ frequency.
  * We call it with interrupts disabled.
@@ -5619,6 +5680,10 @@ void scheduler_tick(void)
 		arch_scale_freq_tick();
 
 	sched_clock_tick();
+
+	if (cpu == sysctl_monitored_cpu_core) {
+		++sysctl_scheduler_ticks;
+	}
 
 	rq_lock(rq, &rf);
 

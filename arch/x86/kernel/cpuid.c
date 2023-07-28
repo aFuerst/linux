@@ -48,7 +48,7 @@ struct cpuid_regs_done {
 	struct completion done;
 };
 
-static void cpuid_smp_cpuid(void *cmd_block)
+void cpuid_smp_cpuid(void *cmd_block)
 {
 	struct cpuid_regs_done *cmd = cmd_block;
 

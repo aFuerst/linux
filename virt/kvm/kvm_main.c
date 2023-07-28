@@ -251,7 +251,7 @@ static bool kvm_request_needs_ipi(struct kvm_vcpu *vcpu, unsigned req)
 	return mode == IN_GUEST_MODE;
 }
 
-static void ack_kick(void *_completed)
+void ack_kick(void *_completed)
 {
 }
 

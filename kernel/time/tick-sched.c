@@ -322,7 +322,7 @@ static bool can_stop_full_tick(int cpu, struct tick_sched *ts)
 	return true;
 }
 
-static void nohz_full_kick_func(struct irq_work *work)
+void nohz_full_kick_func(struct irq_work *work)
 {
 	/* Empty, the tick restart happens on tick_nohz_irq_exit() */
 }
@@ -1377,6 +1377,10 @@ static void tick_nohz_handler(struct clock_event_device *dev)
 	tick_sched_do_timer(ts, now);
 	tick_sched_handle(ts, regs);
 
+	// if (smp_processor_id() == sysctl_monitored_cpu_core) {
+	// 	trace_printk("handling nohz clock event");
+	// }
+
 	if (unlikely(ts->tick_stopped)) {
 		/*
 		 * The clockevent device is not reprogrammed, so change the
@@ -1414,6 +1418,12 @@ static void tick_nohz_switch_to_nohz(void)
 
 	if (tick_switch_to_oneshot(tick_nohz_handler))
 		return;
+
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		dump_stack();
+		printk("switching to no hz timer");
+		trace_printk("switching to no hz timer");
+	}
 
 	/*
 	 * Recycle the hrtimer in ts, so we can share the
@@ -1564,6 +1574,10 @@ void tick_clock_notify(void)
 {
 	int cpu;
 
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		printk("tick_clock_notify to all cores");
+	}
+
 	for_each_possible_cpu(cpu)
 		set_bit(0, &per_cpu(tick_cpu_sched, cpu).check_clocks);
 }
@@ -1574,6 +1588,10 @@ void tick_clock_notify(void)
 void tick_oneshot_notify(void)
 {
 	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);
+
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		printk("tick_oneshot_notify to %d", smp_processor_id());
+	}
 
 	set_bit(0, &ts->check_clocks);
 }
@@ -1588,20 +1606,48 @@ void tick_oneshot_notify(void)
  */
 int tick_check_oneshot_change(int allow_nohz)
 {
+	bool do_print = false;
 	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);
+	if (smp_processor_id() == sysctl_monitored_cpu_core) {
+		do_print = true;
+	}
 
-	if (!test_and_clear_bit(0, &ts->check_clocks))
+	if (!test_and_clear_bit(0, &ts->check_clocks)) {
+		if (do_print) {
+			printk("tick_check check_clocks cleared");
+		}
 		return 0;
+	}
 
-	if (ts->nohz_mode != NOHZ_MODE_INACTIVE)
+	if (do_print) {
+		printk("tick_check tick_sched nohz_mode = %d; allow_nohz = %d", ts->nohz_mode, allow_nohz);
+	}
+
+	if (ts->nohz_mode != NOHZ_MODE_INACTIVE) {
+		if (do_print) {
+			printk("tick_check not in inactive mode");
+		}
 		return 0;
+	}
 
-	if (!timekeeping_valid_for_hres() || !tick_is_oneshot_available())
+	if (!timekeeping_valid_for_hres() || !tick_is_oneshot_available()) {
+		if (do_print) {
+			printk("tick_check !timekeeping_valid_for_hres() || !tick_is_oneshot_available()");
+		}
 		return 0;
+	}
 
-	if (!allow_nohz)
+	if (!allow_nohz) {
+		if (do_print) {
+			printk("tick_check !allow_nohz %d", allow_nohz);
+		}
 		return 1;
+	}
 
+	if (do_print) {
+		printk("tick_check switching to nohz");
+	}
+	printk("tick_check switching to nohz for cpu %d", smp_processor_id());
 	tick_nohz_switch_to_nohz();
 	return 0;
 }
