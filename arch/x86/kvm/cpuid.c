@@ -1500,6 +1500,30 @@ bool kvm_cpuid(struct kvm_vcpu *vcpu, u32 *eax, u32 *ebx,
 }
 EXPORT_SYMBOL_GPL(kvm_cpuid);
 
+#ifdef CONFIG_SYSCTL
+int sysctl_custom_cpuid = 0;
+
+static struct ctl_table cpuid_debug_table[] = {
+	{
+		.procname	= "cpuid_handled",
+		.data		= &sysctl_custom_cpuid,
+		.maxlen		= sizeof(sysctl_custom_cpuid),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static int __init cpuid_sysctl_init(void)
+{
+	pr_info("prepping custom_exits_debug_table table");
+	register_sysctl_init("alex", cpuid_debug_table);
+	return 0;
+}
+late_initcall(cpuid_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+
+
 int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
 	u32 eax, ebx, ecx, edx;

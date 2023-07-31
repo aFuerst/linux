@@ -67,6 +67,7 @@
 #include "vmx.h"
 #include "x86.h"
 #include "smm.h"
+#include "no_kvm.h"
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
@@ -398,7 +399,7 @@ static __always_inline void vmx_disable_fb_clear(struct vcpu_vmx *vmx)
 	vmx->msr_ia32_mcu_opt_ctrl = msr;
 }
 
-static __always_inline void vmx_enable_fb_clear(struct vcpu_vmx *vmx)
+__always_inline void vmx_enable_fb_clear(struct vcpu_vmx *vmx)
 {
 	if (!vmx->disable_fb_clear)
 		return;
@@ -6427,12 +6428,20 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 
 #ifdef CONFIG_SYSCTL
 int sysctl_vmx_exit_handlers = 0;
+int sysctl_orhapned_vm = 0;
 
 static struct ctl_table vmx_handle_exit_debug_table[] = {
 	{
 		.procname	= "vmx_exit_handlers",
 		.data		= &sysctl_vmx_exit_handlers,
 		.maxlen		= sizeof(sysctl_vmx_exit_handlers),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "orphaned_vm",
+		.data		= &sysctl_orhapned_vm,
+		.maxlen		= sizeof(sysctl_orhapned_vm),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
@@ -7452,8 +7461,11 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
-	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
-				   flags);
+	if (sysctl_orhapned_vm)
+		handle_orphan_vm_exits(vmx, flags);
+	else 
+		vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
+					flags);
 
 	vcpu->arch.cr2 = native_read_cr2();
 

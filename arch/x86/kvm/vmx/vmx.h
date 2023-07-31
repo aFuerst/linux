@@ -768,4 +768,6 @@ static inline bool guest_cpuid_has_evmcs(struct kvm_vcpu *vcpu)
 	       to_vmx(vcpu)->nested.enlightened_vmcs_enabled;
 }
 
+__always_inline void vmx_enable_fb_clear(struct vcpu_vmx *vmx);
+
 #endif /* __KVM_X86_VMX_H */
