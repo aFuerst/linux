@@ -29,6 +29,7 @@
 #include <linux/tboot.h>
 #include <linux/trace_events.h>
 #include <linux/entry-kvm.h>
+#include <linux/no_kvm.h>
 
 #include <asm/apic.h>
 #include <asm/asm.h>
@@ -67,10 +68,10 @@
 #include "vmx.h"
 #include "x86.h"
 #include "smm.h"
-#include "no_kvm.h"
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
+
 
 #ifdef MODULE
 static const struct x86_cpu_id vmx_cpu_id[] = {
@@ -385,7 +386,7 @@ static void vmx_setup_fb_clear_ctrl(void)
 	}
 }
 
-static __always_inline void vmx_disable_fb_clear(struct vcpu_vmx *vmx)
+__always_inline void vmx_disable_fb_clear(struct vcpu_vmx *vmx)
 {
 	u64 msr;
 
@@ -398,6 +399,7 @@ static __always_inline void vmx_disable_fb_clear(struct vcpu_vmx *vmx)
 	/* Cache the MSR value to avoid reading it later */
 	vmx->msr_ia32_mcu_opt_ctrl = msr;
 }
+EXPORT_SYMBOL(vmx_disable_fb_clear);
 
 __always_inline void vmx_enable_fb_clear(struct vcpu_vmx *vmx)
 {
@@ -455,6 +457,7 @@ noinline void vmwrite_error(unsigned long field, unsigned long value)
 	vmx_insn_failed("vmwrite failed: field=%lx val=%lx err=%u\n",
 			field, value, vmcs_read32(VM_INSTRUCTION_ERROR));
 }
+EXPORT_SYMBOL(vmwrite_error);
 
 noinline void vmclear_error(struct vmcs *vmcs, u64 phys_addr)
 {
@@ -1192,7 +1195,7 @@ static inline void pt_save_msr(struct pt_ctx *ctx, u32 addr_range)
 	}
 }
 
-static void pt_guest_enter(struct vcpu_vmx *vmx)
+void pt_guest_enter(struct vcpu_vmx *vmx)
 {
 	if (vmx_pt_mode_is_system())
 		return;
@@ -1208,8 +1211,9 @@ static void pt_guest_enter(struct vcpu_vmx *vmx)
 		pt_load_msr(&vmx->pt_desc.guest, vmx->pt_desc.num_address_ranges);
 	}
 }
+EXPORT_SYMBOL(pt_guest_enter);
 
-static void pt_guest_exit(struct vcpu_vmx *vmx)
+void pt_guest_exit(struct vcpu_vmx *vmx)
 {
 	if (vmx_pt_mode_is_system())
 		return;
@@ -1226,6 +1230,7 @@ static void pt_guest_exit(struct vcpu_vmx *vmx)
 	if (vmx->pt_desc.host.ctl)
 		wrmsrl(MSR_IA32_RTIT_CTL, vmx->pt_desc.host.ctl);
 }
+EXPORT_SYMBOL(pt_guest_exit);
 
 void vmx_set_host_fs_gs(struct vmcs_host_state *host, u16 fs_sel, u16 gs_sel,
 			unsigned long fs_base, unsigned long gs_base)
@@ -1556,6 +1561,7 @@ void vmx_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 	if ((interruptibility != interruptibility_old))
 		vmcs_write32(GUEST_INTERRUPTIBILITY_INFO, interruptibility);
 }
+EXPORT_SYMBOL(vmx_set_interrupt_shadow);
 
 static int vmx_rtit_ctl_check(struct kvm_vcpu *vcpu, u64 data)
 {
@@ -6428,7 +6434,8 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 
 #ifdef CONFIG_SYSCTL
 int sysctl_vmx_exit_handlers = 0;
-int sysctl_orhapned_vm = 0;
+int sysctl_orphaned_vm = 0;
+int sysctl_orphaned_vm_return = 1;
 
 static struct ctl_table vmx_handle_exit_debug_table[] = {
 	{
@@ -6440,8 +6447,15 @@ static struct ctl_table vmx_handle_exit_debug_table[] = {
 	},
 	{
 		.procname	= "orphaned_vm",
-		.data		= &sysctl_orhapned_vm,
-		.maxlen		= sizeof(sysctl_orhapned_vm),
+		.data		= &sysctl_orphaned_vm,
+		.maxlen		= sizeof(sysctl_orphaned_vm),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "orphaned_vm_return",
+		.data		= &sysctl_orphaned_vm_return,
+		.maxlen		= sizeof(sysctl_orphaned_vm_return),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
@@ -6631,7 +6645,7 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	if (!kvm_vmx_exit_handlers[exit_handler_index])
 		goto unexpected_vmexit;
 
-	pr_err_once("%s%d: kvm_vmx_exit_handlers[%d]", __func__, __LINE__, exit_handler_index);
+	pr_err_once("%s %d: kvm_vmx_exit_handlers[%d]", __func__, __LINE__, exit_handler_index);
 	#ifdef CONFIG_SYSCTL
 	++sysctl_vmx_exit_handlers;
 	#endif
@@ -6684,7 +6698,7 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
  * information but as all relevant affected CPUs have 32KiB L1D cache size
  * there is no point in doing so.
  */
-static noinstr void vmx_l1d_flush(struct kvm_vcpu *vcpu)
+noinstr void vmx_l1d_flush(struct kvm_vcpu *vcpu)
 {
 	int size = PAGE_SIZE << L1D_CACHE_ORDER;
 
@@ -6956,7 +6970,6 @@ static void vmx_apicv_post_state_restore(struct kvm_vcpu *vcpu)
 }
 
 void vmx_do_interrupt_irqoff(unsigned long entry);
-void vmx_do_nmi_irqoff(void);
 
 static void handle_nm_fault_irqoff(struct kvm_vcpu *vcpu)
 {
@@ -7034,7 +7047,7 @@ static struct ctl_table kvm_debug_table[] = {
 
 static int __init kvm_debug_sysctl_init(void)
 {
-	pr_info("prepping kvm sysctl table");
+	pr_info("prepping kvm interrupts sysctl table");
 	register_sysctl_init("alex", kvm_debug_table);
 	return 0;
 }
@@ -7165,7 +7178,7 @@ static struct ctl_table vmx_handle_debug_table[] = {
 };
 static int __init vmx_handle_debug_sysctl_init(void)
 {
-	pr_info("prepping kvm sysctl table");
+	pr_info("prepping vmx handled sysctl table");
 	register_sysctl_init("alex", vmx_handle_debug_table);
 	return 0;
 }
@@ -7235,7 +7248,7 @@ static bool vmx_has_emulated_msr(struct kvm *kvm, u32 index)
 	}
 }
 
-static void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx)
+void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx)
 {
 	u32 exit_intr_info;
 	bool unblock_nmi;
@@ -7274,8 +7287,9 @@ static void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx)
 			ktime_to_ns(ktime_sub(ktime_get(),
 					      vmx->loaded_vmcs->entry_time));
 }
+EXPORT_SYMBOL(vmx_recover_nmi_blocking);
 
-static void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
+void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
 				      u32 idt_vectoring_info,
 				      int instr_len_field,
 				      int error_code_field)
@@ -7329,12 +7343,13 @@ static void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
 	}
 }
 
-static void vmx_complete_interrupts(struct vcpu_vmx *vmx)
+void vmx_complete_interrupts(struct vcpu_vmx *vmx)
 {
 	__vmx_complete_interrupts(&vmx->vcpu, vmx->idt_vectoring_info,
 				  VM_EXIT_INSTRUCTION_LEN,
 				  IDT_VECTORING_ERROR_CODE);
 }
+EXPORT_SYMBOL(vmx_complete_interrupts);
 
 static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 {
@@ -7346,7 +7361,7 @@ static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 }
 
-static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
+void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 {
 	int i, nr_msrs;
 	struct perf_guest_switch_msr *msrs;
@@ -7368,8 +7383,9 @@ static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 			add_atomic_switch_msr(vmx, msrs[i].msr, msrs[i].guest,
 					msrs[i].host, false);
 }
+EXPORT_SYMBOL(atomic_switch_perf_msrs);
 
-static void vmx_update_hv_timer(struct kvm_vcpu *vcpu)
+void vmx_update_hv_timer(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	u64 tscl;
@@ -7394,6 +7410,7 @@ static void vmx_update_hv_timer(struct kvm_vcpu *vcpu)
 		vmx->loaded_vmcs->hv_timer_soft_disabled = true;
 	}
 }
+EXPORT_SYMBOL(vmx_update_hv_timer);
 
 void noinstr vmx_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp)
 {
@@ -7461,12 +7478,13 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
-	if (sysctl_orhapned_vm)
+	/*
+	if (sysctl_orphaned_vm)
 		handle_orphan_vm_exits(vmx, flags);
 	else 
+	*/
 		vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 					flags);
-
 	vcpu->arch.cr2 = native_read_cr2();
 
 	vmx_enable_fb_clear(vmx);
@@ -7492,6 +7510,17 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	static int write_cnt = 0;
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long cr3, cr4;
+
+	#if IS_ENABLED(CONFIG_ORPHAN_VM)
+	if (sysctl_orphaned_vm) {
+		fastpath_t path = handle_orphan_vm_exits(vcpu);
+		if (sysctl_orphaned_vm_return) {
+			return path;
+		}
+		// if (vmx->exit_reason.basic != EXIT_REASON_CPUID) 
+		// 	return EXIT_FASTPATH_NONE;
+	}
+	#endif
 
 	/* Record the guest's net vcpu time for enforced NMI injections. */
 	if (unlikely(!enable_vnmi &&
@@ -8968,3 +8997,9 @@ err_l1d_flush:
 	return r;
 }
 module_init(vmx_init);
+
+EXPORT_SYMBOL(__vmx_vcpu_run);
+EXPORT_SYMBOL(vmx_enable_fb_clear);
+EXPORT_SYMBOL(vmx_l1d_flush);
+EXPORT_SYMBOL(vmx_do_nmi_irqoff);
+EXPORT_SYMBOL(__vmx_vcpu_run_flags);

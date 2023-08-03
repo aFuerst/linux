@@ -11039,7 +11039,7 @@ static struct ctl_table kvm_x86_debug_table[] = {
 
 static int __init kvm_x86_debug_sysctl_init(void)
 {
-	pr_info("prepping kvm sysctl table");
+	pr_info("prepping x86 kvm sysctl table");
 	register_sysctl_init("alex", kvm_x86_debug_table);
 	return 0;
 }

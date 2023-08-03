@@ -137,6 +137,11 @@ SECTIONS
 		*(.text.__x86.*)
 		__indirect_thunk_end = .;
 #endif
+		ALIGN_FUNCTION();
+		__no_kvm_text_start = .;
+		*(.no_kvm.text)
+		__no_kvm_text_end = .;
+
 		STATIC_CALL_TEXT
 
 		ALIGN_ENTRY_TEXT_BEGIN

@@ -1501,7 +1501,7 @@ bool kvm_cpuid(struct kvm_vcpu *vcpu, u32 *eax, u32 *ebx,
 EXPORT_SYMBOL_GPL(kvm_cpuid);
 
 #ifdef CONFIG_SYSCTL
-int sysctl_custom_cpuid = 0;
+static int sysctl_custom_cpuid = 0;
 
 static struct ctl_table cpuid_debug_table[] = {
 	{
@@ -1527,6 +1527,7 @@ late_initcall(cpuid_sysctl_init);
 int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
 	u32 eax, ebx, ecx, edx;
+	++sysctl_custom_cpuid;
 
 	if (cpuid_fault_enabled(vcpu) && !kvm_require_cpl(vcpu, 0))
 		return 1;

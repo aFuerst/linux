@@ -768,6 +768,23 @@ static inline bool guest_cpuid_has_evmcs(struct kvm_vcpu *vcpu)
 	       to_vmx(vcpu)->nested.enlightened_vmcs_enabled;
 }
 
-__always_inline void vmx_enable_fb_clear(struct vcpu_vmx *vmx);
+void vmx_enable_fb_clear(struct vcpu_vmx *vmx);
+void vmx_disable_fb_clear(struct vcpu_vmx *vmx);
+void vmx_do_nmi_irqoff(void);
+noinstr void vmx_l1d_flush(struct kvm_vcpu *vcpu);
+void vmx_update_hv_timer(struct kvm_vcpu *vcpu);
+void vmx_complete_interrupts(struct vcpu_vmx *vmx);
+void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
+				      u32 idt_vectoring_info,
+				      int instr_len_field,
+				      int error_code_field);
+void pt_guest_exit(struct vcpu_vmx *vmx);
+void pt_guest_enter(struct vcpu_vmx *vmx);
+void atomic_switch_perf_msrs(struct vcpu_vmx *vmx);
+void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx);
+
+// bool __read_mostly enable_vnmi = 1;
+// bool __read_mostly enable_preemption_timer = 1;
+// DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
 
 #endif /* __KVM_X86_VMX_H */

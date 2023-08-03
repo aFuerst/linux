@@ -784,6 +784,7 @@ void vmx_passthrough_lbr_msrs(struct kvm_vcpu *vcpu)
 warn:
 	pr_warn_ratelimited("vcpu-%d: fail to passthrough LBR.\n", vcpu->vcpu_id);
 }
+EXPORT_SYMBOL(vmx_passthrough_lbr_msrs);
 
 static void intel_pmu_cleanup(struct kvm_vcpu *vcpu)
 {
