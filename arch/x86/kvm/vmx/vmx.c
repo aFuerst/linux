@@ -6435,7 +6435,7 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 #ifdef CONFIG_SYSCTL
 int sysctl_vmx_exit_handlers = 0;
 int sysctl_orphaned_vm = 0;
-int sysctl_orphaned_vm_return = 1;
+int sysctl_orphaned_vm_return = 0;
 
 static struct ctl_table vmx_handle_exit_debug_table[] = {
 	{
@@ -7478,13 +7478,8 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	if (vcpu->arch.cr2 != native_read_cr2())
 		native_write_cr2(vcpu->arch.cr2);
 
-	/*
-	if (sysctl_orphaned_vm)
-		handle_orphan_vm_exits(vmx, flags);
-	else 
-	*/
-		vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
-					flags);
+	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
+				flags);
 	vcpu->arch.cr2 = native_read_cr2();
 
 	vmx_enable_fb_clear(vmx);
@@ -7504,23 +7499,17 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	guest_state_exit_irqoff();
 }
 
+#if IS_ENABLED(CONFIG_ORPHAN_VM)
+fastpath_t (*jump_orphan_vm)(struct kvm_vcpu *vcpu) = NULL;
+EXPORT_SYMBOL(jump_orphan_vm);
+#endif
+
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	u64 info[5];
 	static int write_cnt = 0;
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long cr3, cr4;
-
-	#if IS_ENABLED(CONFIG_ORPHAN_VM)
-	if (sysctl_orphaned_vm) {
-		fastpath_t path = handle_orphan_vm_exits(vcpu);
-		if (sysctl_orphaned_vm_return) {
-			return path;
-		}
-		// if (vmx->exit_reason.basic != EXIT_REASON_CPUID) 
-		// 	return EXIT_FASTPATH_NONE;
-	}
-	#endif
 
 	/* Record the guest's net vcpu time for enforced NMI injections. */
 	if (unlikely(!enable_vnmi &&
@@ -7607,8 +7596,26 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 	kvm_wait_lapic_expire(vcpu);
 
-	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
-	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+	#if IS_ENABLED(CONFIG_ORPHAN_VM)
+	if (sysctl_orphaned_vm) {
+		fastpath_t path;
+		// pr_info("jumping to orphan handler at %px %pF", jump_orphan_vm, jump_orphan_vm);
+		if (jump_orphan_vm) {
+			path = jump_orphan_vm(vcpu);
+			if (sysctl_orphaned_vm_return) {
+				return path;
+			}
+		} else {
+			pr_err("jump_orphan_vm was null!");
+			vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+		}
+	} else {
+		/* The actual VMENTER/EXIT is in the .noinstr.text section. */
+		vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+	}
+	#else
+		vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+	#endif
 
 	/* All fields are clean at this point */
 	if (kvm_is_using_evmcs()) {

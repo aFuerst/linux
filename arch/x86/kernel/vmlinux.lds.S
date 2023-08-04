@@ -138,9 +138,9 @@ SECTIONS
 		__indirect_thunk_end = .;
 #endif
 		ALIGN_FUNCTION();
-		__no_kvm_text_start = .;
+		__no_kvm_start = .;
 		*(.no_kvm.text)
-		__no_kvm_text_end = .;
+		__no_kvm_end = .;
 
 		STATIC_CALL_TEXT
 

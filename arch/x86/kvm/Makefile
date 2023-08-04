@@ -25,7 +25,7 @@ kvm-$(CONFIG_KVM_SMM)	+= smm.o
 kvm-intel-y		+= vmx/vmx.o vmx/vmenter.o vmx/pmu_intel.o vmx/vmcs12.o \
 			   vmx/hyperv.o vmx/nested.o vmx/posted_intr.o
 
-extra-y       += vmx/no_kvm.lds
+# extra-y       += vmx/no_kvm.lds
 obj-$(CONFIG_ORPHAN_VM)   += vmx/no_kvm.o
 
 kvm-intel-$(CONFIG_X86_SGX_KVM)	+= vmx/sgx.o

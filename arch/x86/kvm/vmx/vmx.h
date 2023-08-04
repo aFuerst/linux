@@ -787,4 +787,10 @@ void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx);
 // bool __read_mostly enable_preemption_timer = 1;
 // DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
 
+#if IS_ENABLED(CONFIG_ORPHAN_VM)
+extern fastpath_t (*jump_orphan_vm)(struct kvm_vcpu *vcpu);
+// EXTERN_SYMBOL(jump_orphan_vm);
+#endif
+
+
 #endif /* __KVM_X86_VMX_H */
