@@ -29,7 +29,7 @@
 #include <linux/tboot.h>
 #include <linux/trace_events.h>
 #include <linux/entry-kvm.h>
-#include <linux/no_kvm.h>
+#include "no_kvm.h"
 
 #include <asm/apic.h>
 #include <asm/asm.h>
@@ -7457,6 +7457,11 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 	}
 }
 
+#if IS_ENABLED(CONFIG_ORPHAN_VM)
+void (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags) = NULL;
+EXPORT_SYMBOL(jump_orphan_vm);
+#endif
+
 static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 					unsigned int flags)
 {
@@ -7480,6 +7485,11 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				flags);
+	if (jump_orphan_vm && sysctl_orphaned_vm) {
+		// pr_info("Jumping to orphan page");
+		jump_orphan_vm(vcpu, flags);
+	}
+
 	vcpu->arch.cr2 = native_read_cr2();
 
 	vmx_enable_fb_clear(vmx);
@@ -7498,11 +7508,6 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 
 	guest_state_exit_irqoff();
 }
-
-#if IS_ENABLED(CONFIG_ORPHAN_VM)
-fastpath_t (*jump_orphan_vm)(struct kvm_vcpu *vcpu) = NULL;
-EXPORT_SYMBOL(jump_orphan_vm);
-#endif
 
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
@@ -7595,7 +7600,7 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		vmx_update_hv_timer(vcpu);
 
 	kvm_wait_lapic_expire(vcpu);
-
+	/*
 	#if IS_ENABLED(CONFIG_ORPHAN_VM)
 	if (sysctl_orphaned_vm) {
 		fastpath_t path;
@@ -7610,12 +7615,13 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 			vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
 		}
 	} else {
-		/* The actual VMENTER/EXIT is in the .noinstr.text section. */
 		vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
 	}
 	#else
-		vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
-	#endif
+	*/
+	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
+	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+	// #endif
 
 	/* All fields are clean at this point */
 	if (kvm_is_using_evmcs()) {
@@ -9006,7 +9012,7 @@ err_l1d_flush:
 module_init(vmx_init);
 
 EXPORT_SYMBOL(__vmx_vcpu_run);
-EXPORT_SYMBOL(vmx_enable_fb_clear);
-EXPORT_SYMBOL(vmx_l1d_flush);
-EXPORT_SYMBOL(vmx_do_nmi_irqoff);
-EXPORT_SYMBOL(__vmx_vcpu_run_flags);
+// EXPORT_SYMBOL(vmx_enable_fb_clear);
+// EXPORT_SYMBOL(vmx_l1d_flush);
+// EXPORT_SYMBOL(vmx_do_nmi_irqoff);
+// EXPORT_SYMBOL(__vmx_vcpu_run_flags);

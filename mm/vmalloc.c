@@ -3347,6 +3347,15 @@ void *__vmalloc(unsigned long size, gfp_t gfp_mask)
 }
 EXPORT_SYMBOL(__vmalloc);
 
+extern void *__vmalloc_prot(unsigned long size, gfp_t gfp_mask, pgprot_t prot)
+{
+	// return __vmalloc_node(size, 1, gfp_mask, NUMA_NO_NODE,
+	// 			__builtin_return_address(0));
+	return __vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END,
+				gfp_mask, prot, 0, NUMA_NO_NODE, __builtin_return_address(0));
+}
+EXPORT_SYMBOL(__vmalloc_prot);
+
 /**
  * vmalloc - allocate virtually contiguous memory
  * @size:    allocation size

@@ -1611,6 +1611,7 @@ int tick_check_oneshot_change(int allow_nohz)
 	if (smp_processor_id() == sysctl_monitored_cpu_core) {
 		do_print = true;
 	}
+	do_print = false;
 
 	if (!test_and_clear_bit(0, &ts->check_clocks)) {
 		if (do_print) {

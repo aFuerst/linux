@@ -788,8 +788,8 @@ void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx);
 // DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
 
 #if IS_ENABLED(CONFIG_ORPHAN_VM)
-extern fastpath_t (*jump_orphan_vm)(struct kvm_vcpu *vcpu);
-// EXTERN_SYMBOL(jump_orphan_vm);
+extern void (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags);
+// extern bool (*orphan_exit_handler)(struct kvm_vcpu *vcpu, unsigned int flags);
 #endif
 
 

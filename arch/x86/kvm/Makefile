@@ -47,6 +47,9 @@ $(obj)/svm/vmenter.o: $(obj)/kvm-asm-offsets.h
 AFLAGS_vmx/vmenter.o    := -iquote $(obj)
 $(obj)/vmx/vmenter.o: $(obj)/kvm-asm-offsets.h
 
+# AFLAGS_vmx/no_kvm_vmenter.o    := -iquote $(obj)
+# $(obj)/vmx/no_kvm_vmenter.o: $(obj)/kvm-asm-offsets.h
+
 $(obj)/kvm-asm-offsets.h: $(obj)/kvm-asm-offsets.s FORCE
 	$(call filechk,offsets,__KVM_ASM_OFFSETS_H__)
 
