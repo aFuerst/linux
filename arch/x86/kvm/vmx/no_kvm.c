@@ -142,6 +142,28 @@ static struct ctl_table custom_exits_debug_table[] = {
 // static DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
 // static DEFINE_PER_CPU(struct cached_cpuid, cached_cpuids);
 
+#define VMX_SEGMENT_FIELD(seg)					\
+	[VCPU_SREG_##seg] = {                                   \
+		.selector = GUEST_##seg##_SELECTOR,		\
+		.base = GUEST_##seg##_BASE,		   	\
+		.limit = GUEST_##seg##_LIMIT,		   	\
+		.ar_bytes = GUEST_##seg##_AR_BYTES,	   	\
+	}
+static const struct kvm_vmx_segment_field {
+	unsigned selector;
+	unsigned base;
+	unsigned limit;
+	unsigned ar_bytes;
+} kvm_vmx_segment_fields[] = {
+	VMX_SEGMENT_FIELD(CS),
+	VMX_SEGMENT_FIELD(DS),
+	VMX_SEGMENT_FIELD(ES),
+	VMX_SEGMENT_FIELD(FS),
+	VMX_SEGMENT_FIELD(GS),
+	VMX_SEGMENT_FIELD(SS),
+	VMX_SEGMENT_FIELD(TR),
+	VMX_SEGMENT_FIELD(LDTR),
+};
 bool pt_mode_is_system = true;
 
 __no_kvm_section __always_inline void no_kvm_spec_ctrl_restore_host(struct vcpu_vmx *vmx,
@@ -174,7 +196,8 @@ __no_kvm_section __always_inline void no_kvm_update_host_rsp(struct vcpu_vmx *vm
 {
 	if (unlikely(host_rsp != vmx->loaded_vmcs->host_state.rsp)) {
 		vmx->loaded_vmcs->host_state.rsp = host_rsp;
-		vmcs_writel(HOST_RSP, host_rsp);
+		__vmcs_writel(HOST_RSP, __vmcs_readl(HOST_RSP) & ~host_rsp);
+		// vmcs_writel(HOST_RSP, host_rsp);
 	}
 }
 
@@ -272,7 +295,7 @@ __no_kvm_section __always_inline unsigned int __no_kvm_vcpu_run_flags(struct vcp
 }
 
 
-__always_inline __no_kvm_section void no_kvm_disable_fb_clear(struct vcpu_vmx *vmx)
+__no_kvm_section __always_inline void no_kvm_disable_fb_clear(struct vcpu_vmx *vmx)
 {
 	u64 msr;
 
@@ -285,7 +308,7 @@ __always_inline __no_kvm_section void no_kvm_disable_fb_clear(struct vcpu_vmx *v
 	/* Cache the MSR value to avoid reading it later */
 	vmx->msr_ia32_mcu_opt_ctrl = msr;
 }
-__always_inline __no_kvm_section void no_kvm_enable_fb_clear(struct vcpu_vmx *vmx)
+__no_kvm_section __always_inline void no_kvm_enable_fb_clear(struct vcpu_vmx *vmx)
 {
 	if (!vmx->disable_fb_clear)
 		return;
@@ -295,9 +318,9 @@ __always_inline __no_kvm_section void no_kvm_enable_fb_clear(struct vcpu_vmx *vm
 }
 
 
-__always_inline __no_kvm_section static void no_kvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
+__no_kvm_section __always_inline static void no_kvm_set_interrupt_shadow(struct kvm_vcpu *vcpu, int mask)
 {
-	u32 interruptibility_old = vmcs_read32(GUEST_INTERRUPTIBILITY_INFO);
+	u32 interruptibility_old = __vmcs_readl(GUEST_INTERRUPTIBILITY_INFO);
 	u32 interruptibility = interruptibility_old;
 
 	interruptibility &= ~(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS);
@@ -308,10 +331,66 @@ __always_inline __no_kvm_section static void no_kvm_set_interrupt_shadow(struct 
 		interruptibility |= GUEST_INTR_STATE_STI;
 
 	if ((interruptibility != interruptibility_old))
-		vmcs_write32(GUEST_INTERRUPTIBILITY_INFO, interruptibility);
+		__vmcs_writel(GUEST_INTERRUPTIBILITY_INFO, interruptibility);
 }
 
-__always_inline __no_kvm_section static bool no_kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
+__no_kvm_section __always_inline static bool no_kvm_is_long_mode(struct kvm_vcpu *vcpu)
+{
+#ifdef CONFIG_X86_64
+	return !!(vcpu->arch.efer & EFER_LMA);
+#else
+	return false;
+#endif
+}
+
+__no_kvm_section __always_inline static bool no_kvm_segment_cache_test_set(struct vcpu_vmx *vmx, unsigned seg,
+				       unsigned field)
+{
+	bool ret;
+	u32 mask = 1 << (seg * SEG_FIELD_NR + field);
+
+	if (!kvm_register_is_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS)) {
+		kvm_register_mark_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS);
+		vmx->segment_cache.bitmask = 0;
+	}
+	ret = vmx->segment_cache.bitmask & mask;
+	vmx->segment_cache.bitmask |= mask;
+	return ret;
+}
+
+
+__no_kvm_section __always_inline static u32 no_kvm_read_guest_seg_ar(struct vcpu_vmx *vmx, unsigned seg)
+{
+	u32 *p = &vmx->segment_cache.seg[seg].ar;
+
+	if (!no_kvm_segment_cache_test_set(vmx, seg, SEG_FIELD_AR))
+		*p = __vmcs_readl(kvm_vmx_segment_fields[seg].ar_bytes);
+	return *p;
+}
+
+__no_kvm_section __always_inline static void no_kvm_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
+{
+	u32 ar = no_kvm_read_guest_seg_ar(to_vmx(vcpu), VCPU_SREG_CS);
+
+	*db = (ar >> 14) & 1;
+	*l = (ar >> 13) & 1;
+}
+
+
+__no_kvm_section __always_inline static bool no_kvm_is_64_bit_mode(struct kvm_vcpu *vcpu)
+{
+	int cs_db, cs_l;
+
+	WARN_ON_ONCE(vcpu->arch.guest_state_protected);
+
+	if (!no_kvm_is_long_mode(vcpu))
+		return false;
+	no_kvm_get_cs_db_l_bits(vcpu, &cs_db, &cs_l);
+	return cs_l;
+}
+
+
+__no_kvm_section __always_inline static bool no_kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 {
 	union vmx_exit_reason exit_reason = to_vmx(vcpu)->exit_reason;
 	unsigned long rip, orig_rip;
@@ -325,10 +404,10 @@ __always_inline __no_kvm_section static bool no_kvm_skip_emulated_instruction(st
 	 * (namely Hyper-V) don't set it due to it being undefined behavior,
 	 * i.e. we end up advancing IP with some random value.
 	 */
-	if (!static_cpu_has(X86_FEATURE_HYPERVISOR) ||
-	    exit_reason.basic != EXIT_REASON_EPT_MISCONFIG) {
-		instr_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
-
+	// pr_info("no_kvm_skip_emulated_instruction !static_cpu_has(X86_FEATURE_HYPERVISOR): %s", !static_cpu_has(X86_FEATURE_HYPERVISOR) ? "true" : "false");
+	if (exit_reason.basic != EXIT_REASON_EPT_MISCONFIG) {
+		instr_len = __vmcs_readl(VM_EXIT_INSTRUCTION_LEN);
+		
 		/*
 		 * Emulating an enclave's instructions isn't supported as KVM
 		 * cannot access the enclave's memory or its true RIP, e.g. the
@@ -359,7 +438,7 @@ __always_inline __no_kvm_section static bool no_kvm_skip_emulated_instruction(st
 		 * mode, but just finding out that we are in 64-bit mode is
 		 * quite expensive.  Only do it if there was a carry.
 		 */
-		if (unlikely(((rip ^ orig_rip) >> 31) == 3) && !is_64_bit_mode(vcpu))
+		if (unlikely(((rip ^ orig_rip) >> 31) == 3) && !no_kvm_is_64_bit_mode(vcpu))
 			rip = (u32)rip;
 #endif
 		kvm_rip_write(vcpu, rip);
@@ -376,7 +455,7 @@ rip_updated:
 }
 
 
-__always_inline __no_kvm_section static int no_kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
+__no_kvm_section __always_inline static int no_kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
     // int cpuid;
 	u32 eax, ebx, ecx, edx;
@@ -402,12 +481,12 @@ __always_inline __no_kvm_section static int no_kvm_emulate_cpuid(struct kvm_vcpu
 	return no_kvm_skip_emulated_instruction(vcpu);
 }
 
-__always_inline __no_kvm_section static void no_kvm_vcpu_enter_exit(struct kvm_vcpu *vcpu,
+__no_kvm_section __always_inline static void no_kvm_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 					unsigned int flags)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 
-    guest_state_enter_irqoff();
+    // guest_state_enter_irqoff();
 
     /* L1D Flush includes CPU buffer clear to mitigate MDS */
     /*
@@ -421,20 +500,20 @@ __always_inline __no_kvm_section static void no_kvm_vcpu_enter_exit(struct kvm_v
     */
     no_kvm_disable_fb_clear(vmx);
 
-    if (vcpu->arch.cr2 != native_read_cr2())
-        native_write_cr2(vcpu->arch.cr2);
+    // if (vcpu->arch.cr2 != native_read_cr2())
+    //     native_write_cr2(vcpu->arch.cr2);
 
-    vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
+    vmx->fail = __no_kvm_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
                 flags);
 
-    vcpu->arch.cr2 = native_read_cr2();
+    // vcpu->arch.cr2 = native_read_cr2();
 
     no_kvm_enable_fb_clear(vmx);
 
     if (unlikely(vmx->fail)) {
         vmx->exit_reason.full = 0xdead;
     } else {
-        vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
+        vmx->exit_reason.full = __vmcs_readl(VM_EXIT_REASON);
     }
 
     /*
@@ -446,13 +525,14 @@ __always_inline __no_kvm_section static void no_kvm_vcpu_enter_exit(struct kvm_v
     }
     */
 
-    guest_state_exit_irqoff();
+    // guest_state_exit_irqoff();
 }
 
-__always_inline __no_kvm_section static bool handle_orphan_exit(struct kvm_vcpu *vcpu) {
+__no_kvm_section __always_inline static bool no_kvm_handle_orphan_exit(struct kvm_vcpu *vcpu) {
     switch (to_vmx(vcpu)->exit_reason.basic) {
     case EXIT_REASON_CPUID:
         ++sysctl_custom_cpuid;
+		cust_printf("no_kvm: !! handling cpuid\n");
         no_kvm_emulate_cpuid(vcpu);
         return true;
 /*
@@ -474,83 +554,152 @@ __always_inline __no_kvm_section static bool handle_orphan_exit(struct kvm_vcpu 
 */
 	default:
         ++sysctl_custom_other;
+		cust_printf("no_kvm: !! handling other\n");
 		return false;
 	}
 }
-
-__always_inline __no_kvm_section static void no_kvm_vcpu_run(struct kvm_vcpu *vcpu)
+__no_kvm_section __always_inline static void no_kvm_clear_atomic_switch_msr_special(struct vcpu_vmx *vmx,
+		unsigned long entry, unsigned long exit)
 {
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
-
-    // for (;;) {
-        /* 
-        *   needed, causes failure on login
-        *   "/lib64/libc.so.6: CPU ISA level is lower than required"
-        */
-        if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
-            vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
-        if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
-            vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
-        vcpu->arch.regs_dirty = 0;
-
-        /*
-        * Refresh vmcs.HOST_CR3 if necessary.  This must be done immediately
-        * prior to VM-Enter, as the kernel may load a new ASID (PCID) any time
-        * it switches back to the current->mm, which can occur in KVM context
-        * when switching to a temporary mm to patch kernel code, e.g. if KVM
-        * toggles a static key while handling a VM-Exit.
-        */
-        /*
-        cr3 = __get_current_cr3_fast();
-        if (unlikely(cr3 != vmx->loaded_vmcs->host_state.cr3)) {
-            vmcs_writel(HOST_CR3, cr3);
-            vmx->loaded_vmcs->host_state.cr3 = cr3;
-        }
-
-        cr4 = cr4_read_shadow();
-        if (unlikely(cr4 != vmx->loaded_vmcs->host_state.cr4)) {
-            vmcs_writel(HOST_CR4, cr4);
-            vmx->loaded_vmcs->host_state.cr4 = cr4;
-        }
-        */
-        no_kvm_pt_guest_enter(vmx);
-
-        atomic_switch_perf_msrs(vmx);
-
-        /* The actual VMENTER/EXIT is in the .noinstr.text section. */
-        no_kvm_vcpu_enter_exit(vcpu, __no_kvm_vcpu_run_flags(vmx));
-        
-       // needed - crashes on login
-    #ifndef CONFIG_X86_64
-        loadsegment(ds, __USER_DS);
-        loadsegment(es, __USER_DS);
-    #endif
-
-        vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
-
-        no_kvm_pt_guest_exit(vmx);
-        // if (unlikely(vmx->fail))
-        //     return vmx->exit_reason.basic;
-
-        // if (unlikely(vmx->exit_reason.failed_vmentry))
-        //     return;
-
-        // vmx->loaded_vmcs->launched = 1;
-        
-        // if (! handle_orphan_exit(vcpu))
-            // break;
-    // }
-	// return vmx->exit_reason.basic;
+	vm_entry_controls_clearbit(vmx, entry);
+	vm_exit_controls_clearbit(vmx, exit);
 }
 
-noinline __no_kvm_section void handle_orphan_vm_exits(struct kvm_vcpu *vcpu, unsigned int flags)
+__no_kvm_section __always_inline int no_kvm_find_loadstore_msr_slot(struct vmx_msrs *m, u32 msr)
+{
+	unsigned int i;
+
+	for (i = 0; i < m->nr; ++i) {
+		if (m->val[i].index == msr)
+			return i;
+	}
+	return -ENOENT;
+}
+
+__no_kvm_section __always_inline static void clear_atomic_switch_msr(struct vcpu_vmx *vmx, unsigned msr)
+{
+	int i;
+	struct msr_autoload *m = &vmx->msr_autoload;
+
+	switch (msr) {
+	case MSR_EFER:
+		if (cpu_has_load_ia32_efer()) {
+			no_kvm_clear_atomic_switch_msr_special(vmx,
+					VM_ENTRY_LOAD_IA32_EFER,
+					VM_EXIT_LOAD_IA32_EFER);
+			return;
+		}
+		break;
+	case MSR_CORE_PERF_GLOBAL_CTRL:
+		if (cpu_has_load_perf_global_ctrl()) {
+			no_kvm_clear_atomic_switch_msr_special(vmx,
+					VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL,
+					VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL);
+			return;
+		}
+		break;
+	}
+	i = no_kvm_find_loadstore_msr_slot(&m->guest, msr);
+	if (i < 0)
+		goto skip_guest;
+	--m->guest.nr;
+	m->guest.val[i] = m->guest.val[m->guest.nr];
+	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, m->guest.nr);
+
+skip_guest:
+	i = no_kvm_find_loadstore_msr_slot(&m->host, msr);
+	if (i < 0)
+		return;
+
+	--m->host.nr;
+	m->host.val[i] = m->host.val[m->host.nr];
+	vmcs_write32(VM_EXIT_MSR_LOAD_COUNT, m->host.nr);
+}
+
+__no_kvm_section __always_inline void no_kvm_atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
+{
+	int i, nr_msrs;
+	struct perf_guest_switch_msr *msrs;
+	struct kvm_pmu *pmu = vcpu_to_pmu(&vmx->vcpu);
+
+	pmu->host_cross_mapped_mask = 0;
+	if (pmu->pebs_enable & pmu->global_ctrl)
+		intel_pmu_cross_mapped_check(pmu);
+
+	/* Note, nr_msrs may be garbage if perf_guest_get_msrs() returns NULL. */
+	msrs = perf_guest_get_msrs(&nr_msrs, (void *)pmu);
+	if (!msrs)
+		return;
+
+	// for (i = 0; i < nr_msrs; i++)
+	// 	if (msrs[i].host == msrs[i].guest)
+	// 		clear_atomic_switch_msr(vmx, msrs[i].msr);
+	// 	else
+	// 		add_atomic_switch_msr(vmx, msrs[i].msr, msrs[i].guest,
+	// 				msrs[i].host, false);
+}
+
+__no_kvm_section __always_inline static void no_kvm_vcpu_run(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	/* 
+	*   needed, causes failure on login
+	*   "/lib64/libc.so.6: CPU ISA level is lower than required"
+	*/
+	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
+		__vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
+	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
+		__vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
+	vcpu->arch.regs_dirty = 0;
+
+	/*
+	* Refresh vmcs.HOST_CR3 if necessary.  This must be done immediately
+	* prior to VM-Enter, as the kernel may load a new ASID (PCID) any time
+	* it switches back to the current->mm, which can occur in KVM context
+	* when switching to a temporary mm to patch kernel code, e.g. if KVM
+	* toggles a static key while handling a VM-Exit.
+	*/
+	/*
+	cr3 = __get_current_cr3_fast();
+	if (unlikely(cr3 != vmx->loaded_vmcs->host_state.cr3)) {
+		vmcs_writel(HOST_CR3, cr3);
+		vmx->loaded_vmcs->host_state.cr3 = cr3;
+	}
+
+	cr4 = cr4_read_shadow();
+	if (unlikely(cr4 != vmx->loaded_vmcs->host_state.cr4)) {
+		vmcs_writel(HOST_CR4, cr4);
+		vmx->loaded_vmcs->host_state.cr4 = cr4;
+	}
+	*/
+	// no_kvm_pt_guest_enter(vmx);
+
+	// no_kvm_atomic_switch_perf_msrs(vmx);
+
+	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
+	no_kvm_vcpu_enter_exit(vcpu, __no_kvm_vcpu_run_flags(vmx));
+	
+	// needed - crashes on login
+#ifndef CONFIG_X86_64
+	loadsegment(ds, __USER_DS);
+	loadsegment(es, __USER_DS);
+#endif
+
+	vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
+
+	// no_kvm_pt_guest_exit(vmx);
+}
+
+__no_kvm_section bool handle_orphan_vm_exits(struct kvm_vcpu *vcpu, unsigned int flags)
 {
     struct vcpu_vmx *vmx;
     // pr_info("landing in orphan handler");
+	cust_printf("no_kvm: !! entering handle_orphan_vm_exits\n");
     if (vcpu == NULL)  {
-        return;
+        return false;
         // pr_info("vCPU null in orphan handler, returning");
     }
+	// return;
     
     vmx = to_vmx(vcpu);
     vcpu->arch.cr2 = native_read_cr2();
@@ -561,7 +710,7 @@ noinline __no_kvm_section void handle_orphan_vm_exits(struct kvm_vcpu *vcpu, uns
     if (unlikely(vmx->fail)) {
         vmx->exit_reason.full = 0xdead;
     } else {
-        vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
+        vmx->exit_reason.full = __vmcs_readl(VM_EXIT_REASON);
     }
 
     // return;
@@ -575,20 +724,22 @@ noinline __no_kvm_section void handle_orphan_vm_exits(struct kvm_vcpu *vcpu, uns
 	// return;
     vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
 
-    no_kvm_pt_guest_exit(vmx);
+    // no_kvm_pt_guest_exit(vmx);
 	// return;
     // pr_info("Inside custom orphan VM exit handler\n");
     for (;;) {
-        if (!handle_orphan_exit(vcpu)) {
+        if (!no_kvm_handle_orphan_exit(vcpu)) {
             // printk("returning from orphan handler");
-            return;
+            return false;
         }
+		return false;
+		cust_printf("no_kvm: jumping to custom no_kvm_vcpu_run\n");
         no_kvm_vcpu_run(vcpu);
     }
 }
-EXPORT_SYMBOL(handle_orphan_vm_exits);
+// EXPORT_SYMBOL(handle_orphan_vm_exits);
 /*
-noinline __no_kvm_section void do_nothing(struct kvm_vcpu *vcpu, unsigned int flags)
+noinline __no_kvm_section __always_inline void do_nothing(struct kvm_vcpu *vcpu, unsigned int flags)
 {
     // pr_info("!!!inside do_nothing!!! %p, %d", vcpu, flags);
     int i=0;
@@ -605,21 +756,7 @@ static struct ctl_table_header *sysctl_table = NULL;
 static void *orphan_vm_code_page = NULL;
 static int init_orphan_page(void)
 {
-	// pgprot_t prot = PAGE_KERNEL_EXEC_NOENC;
-	// unsigned long vaddr, paddr;
-    // void *control_page;
-	// int result = -ENOMEM;
-    // pgd_t *pgd;
-	// p4d_t *p4d;
-	// pud_t *pud;
-	// pmd_t *pmd;
-	// pte_t *pte;
     __kernel_size_t text_len = 0;
-
-	// unsigned long start_pgtable;
-	// int result;
-
-    // orphan_vm_code_page = alloc_page(GFP_KERNEL); //GFP_ATOMIC | 
     text_len = __no_kvm_end - __no_kvm_start;
     // orphan_vm_code_page = __vmalloc(text_len, GFP_KERNEL, PAGE_KERNEL_EXEC);
     // orphan_vm_code_page = __vmalloc_node(text_len, 1, GFP_KERNEL, PAGE_KERNEL_EXEC,
@@ -629,12 +766,7 @@ static int init_orphan_page(void)
     orphan_vm_code_page = __vmalloc_prot(text_len, GFP_KERNEL | __GFP_ZERO, PAGE_KERNEL_EXEC);
     // orphan_vm_code_page = (void*) __get_free_page(GFP_KERNEL);
     // orphan_vm_code_page = module_alloc(PAGE_SIZE);
-	/*
-	 * TODO: Once additional kernel code protection mechanisms are set, ensure
-	 * that the page was not maliciously altered and it is still zeroed.
-	 */
     pr_info("allocated orphan_vm_code_page %p %p\n", orphan_vm_code_page, (void*)__pa(orphan_vm_code_page));
-    // __memset(orphan_vm_code_page, 0, text_len);
     if (!orphan_vm_code_page) {
         pr_warn("orphan_vm_code_page allocation failed\n");
         return -1;
@@ -643,95 +775,27 @@ static int init_orphan_page(void)
     __memcpy(orphan_vm_code_page, handle_orphan_vm_exits, text_len);
 
     pr_info("marking memory as ROX %p\n", orphan_vm_code_page);
-	set_memory_rox((unsigned long)orphan_vm_code_page, 1);
+	set_memory_rox((unsigned long)orphan_vm_code_page, text_len);
 
     // struct page *page = virt_to_page(orphan_vm_code_page);
-    pr_info("orphan_vm_code_page: virt_addr_valid = %s", virt_addr_valid(orphan_vm_code_page) ? "true" : "false");
+    // pr_info("orphan_vm_code_page: virt_addr_valid = %s", virt_addr_valid(orphan_vm_code_page) ? "true" : "false");
 
-    // pr_info("Loading no_kvm module 2 electric boogaloo, orphan func len: %lu\n", text_len);
-    // __memcpy(orphan_vm_code_page, handle_orphan_vm_exits, text_len);
-
-    jump_orphan_vm = (void (*)(struct kvm_vcpu *vcpu, unsigned int flags)) orphan_vm_code_page;
+    jump_orphan_vm = (bool (*)(struct kvm_vcpu *vcpu, unsigned int flags)) orphan_vm_code_page;
     pr_info("init function jumping to code page %p\n", orphan_vm_code_page);
     jump_orphan_vm(NULL, 0);
 
 	return 0;
-
-	/* Calculate the offsets */
-    /*
-    pr_info("getting start_pgtable\n");
-	start_pgtable = page_to_pfn(orphan_vm_code_page) << PAGE_SHIFT;
-    pgd = (pgd_t *)start_pgtable;
-
-	vaddr = (unsigned long)handle_orphan_vm_exits;
-    pr_info("%p getting paddr\n", (void*)vaddr);
-	paddr = __pa(page_address(orphan_vm_code_page)+PAGE_SIZE);
-    pr_info("%p, getting pgd\n", (void*)paddr);
-	pgd += pgd_index(vaddr);
-    pr_info("%p, checking pgd present\n", pgd);
-	if (!pgd_present(*pgd)) {
-        pr_info("pgd not present\n");
-		p4d = (p4d_t *)get_zeroed_page(GFP_KERNEL);
-		if (!p4d)
-			goto err;
-		// image->arch.p4d = p4d;
-		// set_pgd(pgd, __pgd(__pa(p4d) | _KERNPG_TABLE));
-	}
-    pr_info("%p getting p4d\n", pgd);
-	p4d = p4d_offset(pgd, vaddr);
-	if (!p4d_present(*p4d)) {
-        pr_info("pg4 not present\n");
-		pud = (pud_t *)get_zeroed_page(GFP_KERNEL);
-		if (!pud)
-			goto err;
-		// image->arch.pud = pud;
-		// set_p4d(p4d, __p4d(__pa(pud) | _KERNPG_TABLE));
-	}
-    pr_info("%p getting pud\n", p4d);
-	pud = pud_offset(p4d, vaddr);
-	if (!pud_present(*pud)) {
-        pr_info("pud not present\n");
-		pmd = (pmd_t *)get_zeroed_page(GFP_KERNEL);
-		if (!pmd)
-			goto err;
-		// image->arch.pmd = pmd;
-		// set_pud(pud, __pud(__pa(pmd) | _KERNPG_TABLE));
-	}
-    pr_info("getting pmd\n");
-	pmd = pmd_offset(pud, vaddr);
-	if (!pmd_present(*pmd)) {
-        pr_info("pmd not present\n");
-		pte = (pte_t *)get_zeroed_page(GFP_KERNEL);
-		if (!pte)
-			goto err;
-		// image->arch.pte = pte;
-		// set_pmd(pmd, __pmd(__pa(pte) | _KERNPG_TABLE));
-	}
-    pr_info("getting pte\n");
-	pte = pte_offset_kernel(pmd, vaddr);
-
-	set_pte(pte, pfn_pte(paddr >> PAGE_SHIFT, prot));
-    control_page = page_address(orphan_vm_code_page) + PAGE_SIZE;
-    // text_len = __no_kvm_end - __no_kvm_start;
-    */
-// err:
-// 	return result;
 }
 #endif
 
 static int __init orphan_vm_init(void) 
 {
-    // __kernel_size_t text_len = 0;
-    // #ifdef CONFIG_ORPHAN_VM
-    // void *control_page;
-    // #endif
     pr_info("!!!!!!!!!! ORPHAN VM INIT !!!!!!!!!!!!!\n");
     sysctl_custom_cpuid = 0;
     sysctl_custom_msr_write = 0;
     sysctl_custom_msr_read = 0;
     sysctl_custom_apic_write = 0;
     sysctl_custom_other = 0;
-    // pt_mode_is_system = vmx_pt_mode_is_system();
     pt_mode_is_system = false;
 
     pr_info("prepping custom_exits_debug_table table\n");
@@ -739,31 +803,11 @@ static int __init orphan_vm_init(void)
     if (!sysctl_table)
         return -1;
 
-    // return init_orphan_page();
     #ifdef CONFIG_ORPHAN_VM
-
-    pr_info("Allocating and setting control page\n");
-    return init_orphan_page();
-    // orphan_vm_code_page = alloc_page(0);
-    // if (orphan_vm_code_page == NULL) {
-    //     return -1;
-    // }
-    /*
-    control_page = page_address(orphan_vm_code_page) + PAGE_SIZE;
-    if (text_len < PAGE_SIZE) {
-        pgprot_t prot = PAGE_KERNEL_EXEC;
-        // unsigned long vaddr, paddr;
-    	__memcpy(control_page, handle_orphan_vm_exits, text_len);
-        // set_pte(pte, pfn_pte(__pa(control_page) >> PAGE_SHIFT, prot));
-        // set_memory_rox((unsigned long)page_address(orphan_vm_code_page), text_len);
-    } else {
-        pr_warn("orphan VM code size is larger than page!");
-    }
-    */
-    // TODO: jump to code page instead
-    // jump_orphan_vm = (void (*)(struct kvm_vcpu *vcpu, unsigned int flags)) control_page;
+		pr_info("Allocating and setting control page\n");
+		return init_orphan_page();
     #else
-    jump_orphan_vm = handle_orphan_vm_exits;
+	    jump_orphan_vm = handle_orphan_vm_exits;
     #endif
     return 0;
 }

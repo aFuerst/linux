@@ -26,7 +26,7 @@ kvm-intel-y		+= vmx/vmx.o vmx/vmenter.o vmx/pmu_intel.o vmx/vmcs12.o \
 			   vmx/hyperv.o vmx/nested.o vmx/posted_intr.o
 
 # extra-y       += vmx/no_kvm.lds
-obj-$(CONFIG_ORPHAN_VM)   += vmx/no_kvm.o
+obj-$(CONFIG_ORPHAN_VM)   += vmx/no_kvm.o vmx/no_kvm_printf.o vmx/no_kvm_vmenter.o
 
 kvm-intel-$(CONFIG_X86_SGX_KVM)	+= vmx/sgx.o
 
@@ -47,8 +47,8 @@ $(obj)/svm/vmenter.o: $(obj)/kvm-asm-offsets.h
 AFLAGS_vmx/vmenter.o    := -iquote $(obj)
 $(obj)/vmx/vmenter.o: $(obj)/kvm-asm-offsets.h
 
-# AFLAGS_vmx/no_kvm_vmenter.o    := -iquote $(obj)
-# $(obj)/vmx/no_kvm_vmenter.o: $(obj)/kvm-asm-offsets.h
+AFLAGS_vmx/no_kvm_vmenter.o    := -iquote $(obj)
+$(obj)/vmx/no_kvm_vmenter.o: $(obj)/kvm-asm-offsets.h
 
 $(obj)/kvm-asm-offsets.h: $(obj)/kvm-asm-offsets.s FORCE
 	$(call filechk,offsets,__KVM_ASM_OFFSETS_H__)

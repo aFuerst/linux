@@ -6433,9 +6433,10 @@ void dump_vmcs(struct kvm_vcpu *vcpu)
 }
 
 #ifdef CONFIG_SYSCTL
-int sysctl_vmx_exit_handlers = 0;
-int sysctl_orphaned_vm = 0;
-int sysctl_orphaned_vm_return = 0;
+static int sysctl_vmx_exit_handlers = 0;
+static int sysctl_orphaned_vm = 0;
+static int sysctl_orphaned_vm_debug_print = 1;
+static int sysctl_orphaned_vm_return = 0;
 
 static struct ctl_table vmx_handle_exit_debug_table[] = {
 	{
@@ -6449,6 +6450,13 @@ static struct ctl_table vmx_handle_exit_debug_table[] = {
 		.procname	= "orphaned_vm",
 		.data		= &sysctl_orphaned_vm,
 		.maxlen		= sizeof(sysctl_orphaned_vm),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "orphaned_vm_debug_print",
+		.data		= &sysctl_orphaned_vm_debug_print,
+		.maxlen		= sizeof(sysctl_orphaned_vm_debug_print),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
@@ -7458,7 +7466,7 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 }
 
 #if IS_ENABLED(CONFIG_ORPHAN_VM)
-void (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags) = NULL;
+bool (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags) = NULL;
 EXPORT_SYMBOL(jump_orphan_vm);
 #endif
 
@@ -7466,6 +7474,7 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 					unsigned int flags)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	bool handled = false;
 
 	guest_state_enter_irqoff();
 
@@ -7486,8 +7495,10 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				flags);
 	if (jump_orphan_vm && sysctl_orphaned_vm) {
-		// pr_info("Jumping to orphan page");
-		jump_orphan_vm(vcpu, flags);
+		if (sysctl_orphaned_vm_debug_print)
+			pr_info("Jumping to orphan page");
+
+		handled = jump_orphan_vm(vcpu, flags);
 	}
 
 	vcpu->arch.cr2 = native_read_cr2();

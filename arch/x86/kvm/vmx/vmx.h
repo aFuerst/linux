@@ -422,7 +422,7 @@ void pt_update_intercept_for_msr(struct kvm_vcpu *vcpu);
 void vmx_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp);
 void vmx_spec_ctrl_restore_host(struct vcpu_vmx *vmx, unsigned int flags);
 unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx *vmx);
-bool __vmx_vcpu_run(struct vcpu_vmx *vmx, unsigned long *regs,
+__always_inline bool __vmx_vcpu_run(struct vcpu_vmx *vmx, unsigned long *regs,
 		    unsigned int flags);
 int vmx_find_loadstore_msr_slot(struct vmx_msrs *m, u32 msr);
 void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu);
@@ -788,7 +788,7 @@ void vmx_recover_nmi_blocking(struct vcpu_vmx *vmx);
 // DEFINE_STATIC_KEY_FALSE(vmx_l1d_should_flush);
 
 #if IS_ENABLED(CONFIG_ORPHAN_VM)
-extern void (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags);
+extern bool (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags);
 // extern bool (*orphan_exit_handler)(struct kvm_vcpu *vcpu, unsigned int flags);
 #endif
 

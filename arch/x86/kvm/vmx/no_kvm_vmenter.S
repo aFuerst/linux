@@ -166,7 +166,7 @@ SYM_FUNC_START(__no_kvm_vcpu_run)
 
 	/*
 	 * After a successful VMRESUME/VMLAUNCH, control flow "magically"
-	 * resumes below at 'vmx_vmexit' due to the VMCS HOST_RIP setting.
+	 * resumes below at 'no_kvm_vmexit' due to the VMCS HOST_RIP setting.
 	 * So this isn't a typical function and objtool needs to be told to
 	 * save the unwind state here and restore it below.
 	 */
@@ -174,7 +174,7 @@ SYM_FUNC_START(__no_kvm_vcpu_run)
 
 /*
  * If VMRESUME/VMLAUNCH and corresponding vmexit succeed, execution resumes at
- * the 'vmx_vmexit' label below.
+ * the 'no_kvm_vmexit' label below.
  */
 .Lvmresume:
 	vmresume
@@ -187,7 +187,7 @@ SYM_FUNC_START(__no_kvm_vcpu_run)
 	_ASM_EXTABLE(.Lvmresume, .Lfixup)
 	_ASM_EXTABLE(.Lvmlaunch, .Lfixup)
 
-SYM_INNER_LABEL(vmx_vmexit, SYM_L_GLOBAL)
+SYM_INNER_LABEL(no_kvm_vmexit, SYM_L_GLOBAL)
 
 	/* Restore unwind state from before the VMRESUME/VMLAUNCH. */
 	UNWIND_HINT_RESTORE
@@ -352,6 +352,6 @@ SYM_FUNC_START(vmread_error_trampoline)
 SYM_FUNC_END(vmread_error_trampoline)
 #endif
 
-SYM_FUNC_START(vmx_do_interrupt_irqoff)
+SYM_FUNC_START(no_kvm_do_interrupt_irqoff)
 	VMX_DO_EVENT_IRQOFF CALL_NOSPEC _ASM_ARG1
-SYM_FUNC_END(vmx_do_interrupt_irqoff)
+SYM_FUNC_END(no_kvm_do_interrupt_irqoff)
