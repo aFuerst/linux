@@ -172,13 +172,13 @@ __no_kvm_section __always_inline void putchar(int ch)
 // }
 // */
 
-__no_kvm_section __always_inline void cust_printf(const char *fmt)
+__no_kvm_section __always_inline void __nokern_printf(const char *fmt)
 {
-    return;
+    // return;
     // char *p;
-	// for ( ; *fmt != '\0'; ++fmt) {
-    //     putchar(*fmt);
-    // }
+	for ( ; *fmt != '\0'; ++fmt) {
+        putchar(*fmt);
+    }
     // /*
 	// va_list args;
 

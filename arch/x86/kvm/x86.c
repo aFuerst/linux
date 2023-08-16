@@ -10771,8 +10771,10 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
 			break;
 
-		if (kvm_lapic_enabled(vcpu))
+		if (kvm_lapic_enabled(vcpu)) {
 			static_call_cond(kvm_x86_sync_pir_to_irr)(vcpu);
+			pr_info("lapic enabled, kvm_x86_sync_pir_to_irr\n");
+		}
 
 		if (unlikely(kvm_vcpu_exit_request(vcpu))) {
 			exit_fastpath = EXIT_FASTPATH_EXIT_HANDLED;

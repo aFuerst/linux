@@ -26,7 +26,10 @@ kvm-intel-y		+= vmx/vmx.o vmx/vmenter.o vmx/pmu_intel.o vmx/vmcs12.o \
 			   vmx/hyperv.o vmx/nested.o vmx/posted_intr.o
 
 # extra-y       += vmx/no_kvm.lds
-obj-$(CONFIG_ORPHAN_VM)   += vmx/no_kvm.o vmx/no_kvm_printf.o vmx/no_kvm_vmenter.o
+no-kvm-y   += vmx/no_kvm.o vmx/no_kvm_vmenter.o 
+ifeq ($(CONFIG_ORPHAN_VM),y)
+no-kvm-y   += vmx/no_kvm_printf.o
+endif
 
 kvm-intel-$(CONFIG_X86_SGX_KVM)	+= vmx/sgx.o
 
@@ -39,6 +42,7 @@ endif
 
 obj-$(CONFIG_KVM)	+= kvm.o
 obj-$(CONFIG_KVM_INTEL)	+= kvm-intel.o
+obj-$(CONFIG_ORPHAN_VM)	+= no-kvm.o
 obj-$(CONFIG_KVM_AMD)	+= kvm-amd.o
 
 AFLAGS_svm/vmenter.o    := -iquote $(obj)

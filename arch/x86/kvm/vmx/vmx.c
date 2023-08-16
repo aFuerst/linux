@@ -6928,9 +6928,11 @@ static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 		 * But on x86 this is just a compiler barrier anyway.
 		 */
 		smp_mb__after_atomic();
+		pr_info("vmx_sync_pir_to_irr -> kvm_apic_update_irr\n");
 		got_posted_interrupt =
 			kvm_apic_update_irr(vcpu, vmx->pi_desc.pir, &max_irr);
 	} else {
+		pr_info("vmx_sync_pir_to_irr -> kvm_lapic_find_highest_irr\n");
 		max_irr = kvm_lapic_find_highest_irr(vcpu);
 		got_posted_interrupt = false;
 	}
@@ -6950,10 +6952,15 @@ static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 	 * attempt to post interrupts.  The posted interrupt vector will cause
 	 * a VM-Exit and the subsequent entry will call sync_pir_to_irr.
 	 */
-	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu))
+	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu)) {
+		pr_info("calling vmx_set_rvi\n");
 		vmx_set_rvi(max_irr);
-	else if (got_posted_interrupt)
+	} else if (got_posted_interrupt) {
+		pr_info("calling kvm_make_request(KVM_REQ_EVENT\n");
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
+	} else {
+		pr_info("vmx_sync_pir_to_irr no posting\n");
+	}
 
 	return max_irr;
 }
@@ -7466,7 +7473,7 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 }
 
 #if IS_ENABLED(CONFIG_ORPHAN_VM)
-bool (*jump_orphan_vm)(struct kvm_vcpu *vcpu, unsigned int flags) = NULL;
+bool (*jump_orphan_vm)(struct kvm_vcpu *vcpu, int cpu_preemption_timer_multi) = NULL;
 EXPORT_SYMBOL(jump_orphan_vm);
 #endif
 
@@ -7498,18 +7505,23 @@ static noinstr void vmx_vcpu_enter_exit(struct kvm_vcpu *vcpu,
 		if (sysctl_orphaned_vm_debug_print)
 			pr_info("Jumping to orphan page");
 
-		handled = jump_orphan_vm(vcpu, flags);
+		handled = jump_orphan_vm(vcpu, cpu_preemption_timer_multi);
+		vmcs_writel(HOST_RIP, (unsigned long)vmx_vmexit); /* 22.2.5 */
 	}
 
-	vcpu->arch.cr2 = native_read_cr2();
+	// handled inside  jump_orphan_vm
+	if (! (jump_orphan_vm && sysctl_orphaned_vm)) {
+		vcpu->arch.cr2 = native_read_cr2();
 
-	vmx_enable_fb_clear(vmx);
+		vmx_enable_fb_clear(vmx);
 
-	if (unlikely(vmx->fail))
-		vmx->exit_reason.full = 0xdead;
-	else
-		vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
+		if (unlikely(vmx->fail))
+			vmx->exit_reason.full = 0xdead;
+		else
+			vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
 
+	}
+	
 	if ((u16)vmx->exit_reason.basic == EXIT_REASON_EXCEPTION_NMI &&
 	    is_nmi(vmx_get_intr_info(vcpu))) {
 		kvm_before_interrupt(vcpu, KVM_HANDLING_NMI);

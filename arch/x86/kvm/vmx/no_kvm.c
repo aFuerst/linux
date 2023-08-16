@@ -166,7 +166,7 @@ static const struct kvm_vmx_segment_field {
 };
 bool pt_mode_is_system = true;
 
-__no_kvm_section __always_inline void no_kvm_spec_ctrl_restore_host(struct vcpu_vmx *vmx,
+__no_kvm_section void no_kvm_spec_ctrl_restore_host(struct vcpu_vmx *vmx,
 					unsigned int flags)
 {
 	u64 hostval = this_cpu_read(x86_spec_ctrl_current);
@@ -192,7 +192,7 @@ __no_kvm_section __always_inline void no_kvm_spec_ctrl_restore_host(struct vcpu_
 }
 
 
-__no_kvm_section __always_inline void no_kvm_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp)
+__no_kvm_section void no_kvm_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp)
 {
 	if (unlikely(host_rsp != vmx->loaded_vmcs->host_state.rsp)) {
 		vmx->loaded_vmcs->host_state.rsp = host_rsp;
@@ -381,7 +381,7 @@ __no_kvm_section __always_inline static bool no_kvm_is_64_bit_mode(struct kvm_vc
 {
 	int cs_db, cs_l;
 
-	WARN_ON_ONCE(vcpu->arch.guest_state_protected);
+	// WARN_ON_ONCE(vcpu->arch.guest_state_protected);
 
 	if (!no_kvm_is_long_mode(vcpu))
 		return false;
@@ -427,8 +427,8 @@ __no_kvm_section __always_inline static bool no_kvm_skip_emulated_instruction(st
 		if (!instr_len)
 			goto rip_updated;
 
-		WARN_ONCE(exit_reason.enclave_mode,
-			  "skipping instruction after SGX enclave VM-Exit");
+		// WARN_ONCE(exit_reason.enclave_mode,
+		// 	  "skipping instruction after SGX enclave VM-Exit");
 
 		orig_rip = kvm_rip_read(vcpu);
 		rip = orig_rip + instr_len;
@@ -454,14 +454,44 @@ rip_updated:
 	return true;
 }
 
+static __no_kvm_section __always_inline bool no_kvm_cpuid_fault_enabled(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.msr_misc_features_enables &
+		  MSR_MISC_FEATURES_ENABLES_CPUID_FAULT;
+}
+
+int no_kvm_get_cpl(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+
+	if (unlikely(vmx->rmode.vm86_active))
+		return 0;
+	else {
+		int ar = no_kvm_read_guest_seg_ar(vmx, VCPU_SREG_SS);
+		return VMX_AR_DPL(ar);
+	}
+}
+bool no_kvm_require_cpl(struct kvm_vcpu *vcpu, int required_cpl)
+{
+	if (no_kvm_get_cpl(vcpu) <= required_cpl)
+		return true;
+	// TODO: this
+	// kvm_queue_exception_e(vcpu, GP_VECTOR, 0);
+	return false;
+}
 
 __no_kvm_section __always_inline static int no_kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
 {
     // int cpuid;
 	u32 eax, ebx, ecx, edx;
+	// kvm_emulate_cpuid(vcpu);
+	// return true;
 
-	// if (cpuid_fault_enabled(vcpu) && !kvm_require_cpl(vcpu, 0))
-	// 	return 1;
+	if (no_kvm_cpuid_fault_enabled(vcpu) && !no_kvm_require_cpl(vcpu, 0)) {
+		cust_printf("no_kvm: !! cpuid enabled\n");
+		return true;
+	}
+	cust_printf("no_kvm: !! cpuid emulated\n");
 
 	eax = kvm_rax_read(vcpu);
 	ecx = kvm_rcx_read(vcpu);
@@ -485,8 +515,9 @@ __no_kvm_section __always_inline static void no_kvm_vcpu_enter_exit(struct kvm_v
 					unsigned int flags)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
-
-    // guest_state_enter_irqoff();
+	#if IS_MODULE(CONFIG_ORPHAN_VM)
+    guest_state_enter_irqoff();
+	#endif
 
     /* L1D Flush includes CPU buffer clear to mitigate MDS */
     /*
@@ -500,13 +531,13 @@ __no_kvm_section __always_inline static void no_kvm_vcpu_enter_exit(struct kvm_v
     */
     no_kvm_disable_fb_clear(vmx);
 
-    // if (vcpu->arch.cr2 != native_read_cr2())
-    //     native_write_cr2(vcpu->arch.cr2);
+    if (vcpu->arch.cr2 != native_read_cr2())
+        native_write_cr2(vcpu->arch.cr2);
 
     vmx->fail = __no_kvm_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
                 flags);
 
-    // vcpu->arch.cr2 = native_read_cr2();
+    vcpu->arch.cr2 = native_read_cr2();
 
     no_kvm_enable_fb_clear(vmx);
 
@@ -525,7 +556,9 @@ __no_kvm_section __always_inline static void no_kvm_vcpu_enter_exit(struct kvm_v
     }
     */
 
-    // guest_state_exit_irqoff();
+    #if IS_MODULE(CONFIG_ORPHAN_VM)
+    guest_state_exit_irqoff();
+	#endif
 }
 
 __no_kvm_section __always_inline static bool no_kvm_handle_orphan_exit(struct kvm_vcpu *vcpu) {
@@ -533,6 +566,7 @@ __no_kvm_section __always_inline static bool no_kvm_handle_orphan_exit(struct kv
     case EXIT_REASON_CPUID:
         ++sysctl_custom_cpuid;
 		cust_printf("no_kvm: !! handling cpuid\n");
+		// return false;
         no_kvm_emulate_cpuid(vcpu);
         return true;
 /*
@@ -558,90 +592,41 @@ __no_kvm_section __always_inline static bool no_kvm_handle_orphan_exit(struct kv
 		return false;
 	}
 }
-__no_kvm_section __always_inline static void no_kvm_clear_atomic_switch_msr_special(struct vcpu_vmx *vmx,
-		unsigned long entry, unsigned long exit)
-{
-	vm_entry_controls_clearbit(vmx, entry);
-	vm_exit_controls_clearbit(vmx, exit);
-}
-
-__no_kvm_section __always_inline int no_kvm_find_loadstore_msr_slot(struct vmx_msrs *m, u32 msr)
-{
-	unsigned int i;
-
-	for (i = 0; i < m->nr; ++i) {
-		if (m->val[i].index == msr)
-			return i;
-	}
-	return -ENOENT;
-}
-
-__no_kvm_section __always_inline static void clear_atomic_switch_msr(struct vcpu_vmx *vmx, unsigned msr)
-{
-	int i;
-	struct msr_autoload *m = &vmx->msr_autoload;
-
-	switch (msr) {
-	case MSR_EFER:
-		if (cpu_has_load_ia32_efer()) {
-			no_kvm_clear_atomic_switch_msr_special(vmx,
-					VM_ENTRY_LOAD_IA32_EFER,
-					VM_EXIT_LOAD_IA32_EFER);
-			return;
-		}
-		break;
-	case MSR_CORE_PERF_GLOBAL_CTRL:
-		if (cpu_has_load_perf_global_ctrl()) {
-			no_kvm_clear_atomic_switch_msr_special(vmx,
-					VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL,
-					VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL);
-			return;
-		}
-		break;
-	}
-	i = no_kvm_find_loadstore_msr_slot(&m->guest, msr);
-	if (i < 0)
-		goto skip_guest;
-	--m->guest.nr;
-	m->guest.val[i] = m->guest.val[m->guest.nr];
-	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, m->guest.nr);
-
-skip_guest:
-	i = no_kvm_find_loadstore_msr_slot(&m->host, msr);
-	if (i < 0)
-		return;
-
-	--m->host.nr;
-	m->host.val[i] = m->host.val[m->host.nr];
-	vmcs_write32(VM_EXIT_MSR_LOAD_COUNT, m->host.nr);
-}
-
-__no_kvm_section __always_inline void no_kvm_atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
-{
-	int i, nr_msrs;
-	struct perf_guest_switch_msr *msrs;
-	struct kvm_pmu *pmu = vcpu_to_pmu(&vmx->vcpu);
-
-	pmu->host_cross_mapped_mask = 0;
-	if (pmu->pebs_enable & pmu->global_ctrl)
-		intel_pmu_cross_mapped_check(pmu);
-
-	/* Note, nr_msrs may be garbage if perf_guest_get_msrs() returns NULL. */
-	msrs = perf_guest_get_msrs(&nr_msrs, (void *)pmu);
-	if (!msrs)
-		return;
-
-	// for (i = 0; i < nr_msrs; i++)
-	// 	if (msrs[i].host == msrs[i].guest)
-	// 		clear_atomic_switch_msr(vmx, msrs[i].msr);
-	// 	else
-	// 		add_atomic_switch_msr(vmx, msrs[i].msr, msrs[i].guest,
-	// 				msrs[i].host, false);
-}
-
-__no_kvm_section __always_inline static void no_kvm_vcpu_run(struct kvm_vcpu *vcpu)
+__no_kvm_section __always_inline static void no_kvm_update_hv_timer(struct kvm_vcpu *vcpu, int cpu_preemption_timer_multi)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	u64 tscl;
+	u32 delta_tsc;
+
+	if (vmx->req_immediate_exit) {
+		__vmcs_writel(VMX_PREEMPTION_TIMER_VALUE, 0);
+		vmx->loaded_vmcs->hv_timer_soft_disabled = false;
+	} else if (vmx->hv_deadline_tsc != -1) {
+		tscl = rdtsc();
+		if (vmx->hv_deadline_tsc > tscl)
+			/* set_hv_timer ensures the delta fits in 32-bits */
+			delta_tsc = (u32)((vmx->hv_deadline_tsc - tscl) >>
+				cpu_preemption_timer_multi);
+		else
+			delta_tsc = 0;
+
+		__vmcs_writel(VMX_PREEMPTION_TIMER_VALUE, delta_tsc);
+		vmx->loaded_vmcs->hv_timer_soft_disabled = false;
+	} else if (!vmx->loaded_vmcs->hv_timer_soft_disabled) {
+		__vmcs_writel(VMX_PREEMPTION_TIMER_VALUE, -1);
+		vmx->loaded_vmcs->hv_timer_soft_disabled = true;
+	}
+}
+
+__no_kvm_section __always_inline static void no_kvm_vcpu_run(struct kvm_vcpu *vcpu, int cpu_preemption_timer_multi)
+{
+	unsigned long cr3, cr4;
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	if (vmx->ple_window_dirty) {
+		vmx->ple_window_dirty = false;
+		__vmcs_writel(PLE_WINDOW, vmx->ple_window);
+	}
+
 	/* 
 	*   needed, causes failure on login
 	*   "/lib64/libc.so.6: CPU ISA level is lower than required"
@@ -659,23 +644,26 @@ __no_kvm_section __always_inline static void no_kvm_vcpu_run(struct kvm_vcpu *vc
 	* when switching to a temporary mm to patch kernel code, e.g. if KVM
 	* toggles a static key while handling a VM-Exit.
 	*/
-	/*
-	cr3 = __get_current_cr3_fast();
+	// /*
+	cr3 = __read_cr3(); //__get_current_cr3_fast();
 	if (unlikely(cr3 != vmx->loaded_vmcs->host_state.cr3)) {
-		vmcs_writel(HOST_CR3, cr3);
+		__vmcs_writel(HOST_CR3, cr3);
 		vmx->loaded_vmcs->host_state.cr3 = cr3;
 	}
 
 	cr4 = cr4_read_shadow();
 	if (unlikely(cr4 != vmx->loaded_vmcs->host_state.cr4)) {
-		vmcs_writel(HOST_CR4, cr4);
+		__vmcs_writel(HOST_CR4, cr4);
 		vmx->loaded_vmcs->host_state.cr4 = cr4;
 	}
-	*/
-	// no_kvm_pt_guest_enter(vmx);
 
-	// no_kvm_atomic_switch_perf_msrs(vmx);
+	// */
+	no_kvm_pt_guest_enter(vmx);
 
+	no_kvm_update_hv_timer(vcpu, cpu_preemption_timer_multi);
+
+	kvm_wait_lapic_expire(vcpu);
+	
 	/* The actual VMENTER/EXIT is in the .noinstr.text section. */
 	no_kvm_vcpu_enter_exit(vcpu, __no_kvm_vcpu_run_flags(vmx));
 	
@@ -687,19 +675,165 @@ __no_kvm_section __always_inline static void no_kvm_vcpu_run(struct kvm_vcpu *vc
 
 	vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
 
-	// no_kvm_pt_guest_exit(vmx);
+	no_kvm_pt_guest_exit(vmx);
 }
 
-__no_kvm_section bool handle_orphan_vm_exits(struct kvm_vcpu *vcpu, unsigned int flags)
+#define MAX_APIC_VECTOR			256
+#define APIC_VECTORS_PER_REG		32
+
+__no_kvm_section __always_inline static int no_kvm_find_highest_vector(void *bitmap)
+{
+	int vec;
+	u32 *reg;
+
+	for (vec = MAX_APIC_VECTOR - APIC_VECTORS_PER_REG;
+	     vec >= 0; vec -= APIC_VECTORS_PER_REG) {
+		reg = bitmap + REG_POS(vec);
+		if (*reg)
+			return __fls(*reg) + vec;
+	}
+
+	return -1;
+}
+__no_kvm_section __always_inline static int no_kvm_apic_search_irr(struct kvm_lapic *apic)
+{
+	return no_kvm_find_highest_vector(apic->regs + APIC_IRR);
+}
+__no_kvm_section __always_inline static int no_kvm_apic_find_highest_irr(struct kvm_lapic *apic)
+{
+	int result;
+
+	/*
+	 * Note that irr_pending is just a hint. It will be always
+	 * true with virtual interrupt delivery enabled.
+	 */
+	if (!apic->irr_pending)
+		return -1;
+
+	result = no_kvm_apic_search_irr(apic);
+	// ASSERT(result == -1 || result >= 16);
+
+	return result;
+}
+__no_kvm_section __always_inline int no_kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu)
+{
+	/* This may race with setting of irr in __apic_accept_irq() and
+	 * value returned may be wrong, but kvm_vcpu_kick() in __apic_accept_irq
+	 * will cause vmexit immediately and the value will be recalculated
+	 * on the next vmentry.
+	 */
+	return no_kvm_apic_find_highest_irr(vcpu->arch.apic);
+}
+__no_kvm_section __always_inline bool __no_kvm_apic_update_irr(u32 *pir, void *regs, int *max_irr)
+{
+	u32 i, vec;
+	u32 pir_val, irr_val, prev_irr_val;
+	int max_updated_irr;
+
+	max_updated_irr = -1;
+	*max_irr = -1;
+
+	for (i = vec = 0; i <= 7; i++, vec += 32) {
+		pir_val = READ_ONCE(pir[i]);
+		irr_val = *((u32 *)(regs + APIC_IRR + i * 0x10));
+		if (pir_val) {
+			prev_irr_val = irr_val;
+			irr_val |= xchg(&pir[i], 0);
+			*((u32 *)(regs + APIC_IRR + i * 0x10)) = irr_val;
+			if (prev_irr_val != irr_val) {
+				max_updated_irr =
+					__fls(irr_val ^ prev_irr_val) + vec;
+			}
+		}
+		if (irr_val)
+			*max_irr = __fls(irr_val) + vec;
+	}
+
+	return ((max_updated_irr != -1) &&
+		(max_updated_irr == *max_irr));
+}
+__no_kvm_section __always_inline bool no_kvm_apic_update_irr(struct kvm_vcpu *vcpu, u32 *pir, int *max_irr)
+{
+	struct kvm_lapic *apic = vcpu->arch.apic;
+
+	return __no_kvm_apic_update_irr(pir, apic->regs, max_irr);
+}
+__no_kvm_section __always_inline static void no_kvm_set_rvi(int vector)
+{
+	u16 status;
+	u8 old;
+
+	if (vector == -1)
+		vector = 0;
+
+	status = vmcs_read16(GUEST_INTR_STATUS);
+	old = (u8)status & 0xff;
+	if ((u8)vector != old) {
+		status &= ~0xff;
+		status |= (u8)vector;
+		vmcs_write16(GUEST_INTR_STATUS, status);
+	}
+}
+__no_kvm_section __always_inline static int no_kvm_sync_pir_to_irr(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	int max_irr;
+	bool got_posted_interrupt;
+
+	if (pi_test_on(&vmx->pi_desc)) {
+		pi_clear_on(&vmx->pi_desc);
+		/*
+		 * IOMMU can write to PID.ON, so the barrier matters even on UP.
+		 * But on x86 this is just a compiler barrier anyway.
+		 */
+		smp_mb__after_atomic();
+		cust_printf("vmx_sync_pir_to_irr -> kvm_apic_update_irr\n");
+		got_posted_interrupt =
+			no_kvm_apic_update_irr(vcpu, vmx->pi_desc.pir, &max_irr);
+	} else {
+		cust_printf("vmx_sync_pir_to_irr -> no_kvm_lapic_find_highest_irr\n");
+		max_irr = no_kvm_lapic_find_highest_irr(vcpu);
+		got_posted_interrupt = false;
+	}
+
+	/*
+	 * Newly recognized interrupts are injected via either virtual interrupt
+	 * delivery (RVI) or KVM_REQ_EVENT.  Virtual interrupt delivery is
+	 * disabled in two cases:
+	 *
+	 * 1) If L2 is running and the vCPU has a new pending interrupt.  If L1
+	 * wants to exit on interrupts, KVM_REQ_EVENT is needed to synthesize a
+	 * VM-Exit to L1.  If L1 doesn't want to exit, the interrupt is injected
+	 * into L2, but KVM doesn't use virtual interrupt delivery to inject
+	 * interrupts into L2, and so KVM_REQ_EVENT is again needed.
+	 *
+	 * 2) If APICv is disabled for this vCPU, assigned devices may still
+	 * attempt to post interrupts.  The posted interrupt vector will cause
+	 * a VM-Exit and the subsequent entry will call sync_pir_to_irr.
+	 */
+	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu)) {
+		cust_printf("calling vmx_set_rvi\n");
+		no_kvm_set_rvi(max_irr);
+	} else if (got_posted_interrupt) {
+		cust_printf("calling kvm_make_request(KVM_REQ_EVENT\n");
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+	} else {
+		cust_printf("vmx_sync_pir_to_irr no posting\n");
+	}
+
+	return max_irr;
+}
+
+__no_kvm_section __always_inline void no_kvm_vmexit(void);
+__no_kvm_section bool handle_orphan_vm_exits(struct kvm_vcpu *vcpu, int cpu_preemption_timer_multi)
 {
     struct vcpu_vmx *vmx;
-    // pr_info("landing in orphan handler");
-	cust_printf("no_kvm: !! entering handle_orphan_vm_exits\n");
+    cust_printf("no_kvm: landing in orphan handler");
     if (vcpu == NULL)  {
         return false;
-        // pr_info("vCPU null in orphan handler, returning");
+        cust_printf("no_kvm: vCPU null in orphan handler, returning");
     }
-	// return;
+	// return false;
     
     vmx = to_vmx(vcpu);
     vcpu->arch.cr2 = native_read_cr2();
@@ -714,7 +848,9 @@ __no_kvm_section bool handle_orphan_vm_exits(struct kvm_vcpu *vcpu, unsigned int
     }
 
     // return;
-    // guest_state_exit_irqoff();
+	#if IS_MODULE(CONFIG_ORPHAN_VM)
+    guest_state_exit_irqoff();
+	#endif
 
     // needed - crashes on login
     #ifndef CONFIG_X86_64
@@ -724,18 +860,22 @@ __no_kvm_section bool handle_orphan_vm_exits(struct kvm_vcpu *vcpu, unsigned int
 	// return;
     vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
 
-    // no_kvm_pt_guest_exit(vmx);
-	// return;
-    // pr_info("Inside custom orphan VM exit handler\n");
+    no_kvm_pt_guest_exit(vmx);
+	no_kvm_sync_pir_to_irr(vcpu);
+	// return false;
+    cust_printf("no_kvm: Inside custom orphan VM exit handler\n");
+	vmcs_writel(HOST_RIP, (unsigned long)no_kvm_vmexit); /* 22.2.5 */
     for (;;) {
         if (!no_kvm_handle_orphan_exit(vcpu)) {
-            // printk("returning from orphan handler");
+            cust_printf("returning from orphan handler\n");
             return false;
         }
-		return false;
+		// return false;
 		cust_printf("no_kvm: jumping to custom no_kvm_vcpu_run\n");
-        no_kvm_vcpu_run(vcpu);
-    }
+        no_kvm_vcpu_run(vcpu, cpu_preemption_timer_multi);
+		return false;
+		no_kvm_sync_pir_to_irr(vcpu);
+	}
 }
 // EXPORT_SYMBOL(handle_orphan_vm_exits);
 /*
@@ -768,7 +908,7 @@ static int init_orphan_page(void)
     // orphan_vm_code_page = module_alloc(PAGE_SIZE);
     pr_info("allocated orphan_vm_code_page %p %p\n", orphan_vm_code_page, (void*)__pa(orphan_vm_code_page));
     if (!orphan_vm_code_page) {
-        pr_warn("orphan_vm_code_page allocation failed\n");
+        cust_printf("orphan_vm_code_page allocation failed\n");
         return -1;
     }
     pr_info("Loading no_kvm module, orphan func len: %lu\n", text_len);
@@ -780,7 +920,7 @@ static int init_orphan_page(void)
     // struct page *page = virt_to_page(orphan_vm_code_page);
     // pr_info("orphan_vm_code_page: virt_addr_valid = %s", virt_addr_valid(orphan_vm_code_page) ? "true" : "false");
 
-    jump_orphan_vm = (bool (*)(struct kvm_vcpu *vcpu, unsigned int flags)) orphan_vm_code_page;
+    jump_orphan_vm = (bool (*)(struct kvm_vcpu *vcpu, int cpu_preemption_timer_multi)) orphan_vm_code_page;
     pr_info("init function jumping to code page %p\n", orphan_vm_code_page);
     jump_orphan_vm(NULL, 0);
 
@@ -796,7 +936,7 @@ static int __init orphan_vm_init(void)
     sysctl_custom_msr_read = 0;
     sysctl_custom_apic_write = 0;
     sysctl_custom_other = 0;
-    pt_mode_is_system = false;
+    pt_mode_is_system = true;
 
     pr_info("prepping custom_exits_debug_table table\n");
     sysctl_table = register_sysctl("alex", custom_exits_debug_table);

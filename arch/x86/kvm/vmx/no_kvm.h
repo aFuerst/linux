@@ -19,8 +19,6 @@ void no_kvm_spec_ctrl_restore_host(struct vcpu_vmx *vmx,
 //     u32 edx;
 // }
 
-void cust_printf(const char *to_print);
-
 /*
  * readX/writeX() are used to access memory mapped devices. On some
  * architectures the memory mapped IO stuff needs to be accessed
@@ -123,5 +121,17 @@ void no_kvm_outl (uint32_t value, uint16_t port)
 		:"a" (value), "Nd" (port));
 }
 #endif /* IS_ENABLED(CONFIG_ORPHAN_VM) */
+
+void __nokern_printf(const char *to_print);
+#ifdef CONFIG_ORPHAN_VM
+void cust_printf(const char *to_print) {
+	__nokern_printf(to_print);
+}
+#elif IS_MODULE(CONFIG_ORPHAN_VM)
+__always_inline void cust_printf(const char *to_print) {
+	pr_info("%s", to_print);
+	// __nokern_printf(to_print);
+}
+#endif
 
 #endif /* __KVM_X86_NO_KVM_H */
